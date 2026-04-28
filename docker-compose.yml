@@ -1,0 +1,35 @@
+services:
+  bdo-api:
+    image: man90/bdo-rest-api:latest
+    container_name: bdo-api
+    restart: always
+    networks:
+      - clarity-internal
+
+  clarity-backend:
+    image: node:20-alpine
+    container_name: clarity-backend
+    restart: always
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+      - ./data:/data
+    command: sh -c "npm install && node server.js"
+    environment:
+      - DB_PATH=/data/clarity.db
+      - BDO_API_URL=http://bdo-api:8001
+      - GUILD_NAME=clarity
+      - REGION=EU
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+
+    depends_on:
+      - bdo-api
+    networks:
+      - proxy-net
+      - clarity-internal
+
+networks:
+  proxy-net:
+    external: true
+  clarity-internal:
+    driver: bridge

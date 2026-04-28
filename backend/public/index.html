@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Clarity – Guild Leaderboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;900&family=Rajdhani:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #07070f;
+      --bg2:       #0d0d1a;
+      --bg3:       #11111f;
+      --border:    #2a1f4a;
+      --gold:      #b388ff;
+      --gold2:     #d4b0ff;
+      --gold-dim:  #5c3d99;
+      --text:      #d8d0f0;
+      --text-dim:  #6a5f8a;
+      --green:     #7c4dff;
+      --red:       #e05580;
+      --accent:    #9c27b0;
+      --glow:      rgba(179,136,255,0.15);
+    }
+
+    html, body { height: 100%; }
+
+    body {
+      font-family: 'Rajdhani', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Background texture ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 40% at 50% 0%, rgba(100,50,180,0.12) 0%, transparent 70%),
+        radial-gradient(ellipse 60% 30% at 80% 100%, rgba(140,70,200,0.07) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    #root { position: relative; z-index: 1; }
+
+    /* ── Header ── */
+    .header {
+      text-align: center;
+      padding: 48px 24px 32px;
+      position: relative;
+    }
+
+    .header::after {
+      content: '';
+      display: block;
+      width: 200px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--gold), transparent);
+      margin: 24px auto 0;
+    }
+
+    .guild-logo {
+      width: 90px;
+      height: 90px;
+      border-radius: 50%;
+      object-fit: cover;
+      margin: 0 auto 16px;
+      display: block;
+      box-shadow: 0 0 40px rgba(140,80,255,0.4), 0 0 80px rgba(100,40,200,0.2);
+      border: 1px solid rgba(179,136,255,0.2);
+    }
+
+    .header-eyebrow {
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: var(--gold-dim);
+      margin-bottom: 12px;
+    }
+
+    .header-title {
+      font-family: 'Cinzel', serif;
+      font-size: clamp(36px, 6vw, 64px);
+      font-weight: 900;
+      color: var(--gold);
+      text-shadow: 0 0 60px rgba(201,168,76,0.3);
+      letter-spacing: 6px;
+      line-height: 1;
+    }
+
+    .header-sub {
+      font-size: 13px;
+      color: var(--text-dim);
+      letter-spacing: 2px;
+      margin-top: 8px;
+    }
+
+    .last-update {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 6px;
+      letter-spacing: 1px;
+    }
+
+    /* ── Nav ── */
+    .nav-wrapper {
+      padding: 0 24px 24px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .nav-section-label {
+      font-size: 10px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+      margin-top: 20px;
+    }
+
+    .nav-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .nav-btn {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 8px 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+      clip-path: polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%);
+    }
+
+    .nav-btn:hover {
+      border-color: var(--gold-dim);
+      color: var(--gold2);
+      background: rgba(201,168,76,0.05);
+    }
+
+    .nav-btn.active {
+      background: rgba(201,168,76,0.1);
+      border-color: var(--gold);
+      color: var(--gold);
+    }
+
+    .nav-btn-fame {
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    /* ── Main content ── */
+    .content {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px 48px;
+    }
+
+    /* ── Skill header ── */
+    .skill-header {
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .skill-title {
+      font-family: 'Cinzel', serif;
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--gold2);
+      letter-spacing: 3px;
+    }
+
+    .skill-count {
+      font-size: 12px;
+      color: var(--text-dim);
+      letter-spacing: 2px;
+    }
+
+    /* ── Table ── */
+    .table-wrapper {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      background: var(--bg2);
+      position: relative;
+    }
+
+    .table-wrapper::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--gold-dim), transparent);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    thead th {
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      padding: 14px 20px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      background: var(--bg3);
+    }
+
+    thead th.num { text-align: right; }
+
+    tbody tr {
+      border-bottom: 1px solid rgba(42,42,64,0.5);
+      transition: background 0.15s;
+      animation: fadeIn 0.3s ease both;
+    }
+
+    tbody tr:hover { background: rgba(201,168,76,0.03); }
+    tbody tr:last-child { border-bottom: none; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    td {
+      padding: 13px 20px;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+
+    /* Rank column */
+    .td-rank {
+      width: 60px;
+      font-family: 'Cinzel', serif;
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+
+    .rank-1 { color: #ffd700; }
+    .rank-2 { color: #c0c0c0; }
+    .rank-3 { color: #cd7f32; }
+
+    .rank-medal {
+      display: inline-block;
+      width: 28px;
+      height: 28px;
+      line-height: 28px;
+      text-align: center;
+      border-radius: 50%;
+      font-size: 12px;
+    }
+    .rank-1 .rank-medal { background: rgba(255,215,0,0.15); border: 1px solid rgba(255,215,0,0.3); }
+    .rank-2 .rank-medal { background: rgba(192,192,192,0.1); border: 1px solid rgba(192,192,192,0.2); }
+    .rank-3 .rank-medal { background: rgba(205,127,50,0.12); border: 1px solid rgba(205,127,50,0.25); }
+
+    /* Name column */
+    .td-name {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--text);
+      letter-spacing: 0.5px;
+    }
+
+    /* Value column */
+    .td-value {
+      text-align: right;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--gold2);
+      font-family: 'Cinzel', serif;
+      letter-spacing: 1px;
+    }
+
+    /* Gain columns */
+    .td-gain {
+      text-align: right;
+      font-size: 13px;
+      font-weight: 500;
+      min-width: 100px;
+    }
+
+    .gain-pos { color: var(--green); font-size: 16px; font-weight: 700; }
+    .gain-neg { color: var(--red); font-size: 16px; font-weight: 700; }
+    .gain-zero { color: var(--text-dim); }
+    .gain-null { color: var(--text-dim); font-size: 11px; letter-spacing: 1px; }
+
+    /* ── Loading / Empty ── */
+    .state-center {
+      text-align: center;
+      padding: 80px 24px;
+      color: var(--text-dim);
+    }
+
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 2px solid var(--border);
+      border-top-color: var(--gold);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 16px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .state-label {
+      font-size: 12px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 600px) {
+      .header { padding: 32px 16px 24px; }
+      .nav-wrapper, .content { padding-left: 16px; padding-right: 16px; }
+      td, thead th { padding: 10px 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useCallback } = React;
+
+    const SKILLS = [
+      { key: 'life_fame',            label: 'Life Fame',            icon: '✦', group: 'overview' },
+      { key: 'contribution_points',  label: 'Contribution Points',  icon: '🔷', group: 'overview' },
+      { key: 'energy',               label: 'Energy',               icon: '⚡', group: 'overview' },
+      { key: 'cooking',              label: 'Cooking',              icon: '🍳', group: 'lifeskill' },
+      { key: 'alchemy',              label: 'Alchemy',              icon: '⚗️', group: 'lifeskill' },
+      { key: 'processing',           label: 'Processing',           icon: '⚙️', group: 'lifeskill' },
+      { key: 'gathering',            label: 'Gathering',            icon: '🌿', group: 'lifeskill' },
+      { key: 'fishing',              label: 'Fishing',              icon: '🎣', group: 'lifeskill' },
+      { key: 'hunting',              label: 'Hunting',              icon: '🏹', group: 'lifeskill' },
+      { key: 'training',             label: 'Training',             icon: '🐎', group: 'lifeskill' },
+      { key: 'trading',              label: 'Trading',              icon: '💰', group: 'lifeskill' },
+      { key: 'farming',              label: 'Farming',              icon: '🌾', group: 'lifeskill' },
+      { key: 'sailing',              label: 'Sailing',              icon: '⛵', group: 'lifeskill' },
+      { key: 'barter',               label: 'Barter',               icon: '🔄', group: 'lifeskill' },
+    ];
+
+    function GainCell({ value }) {
+      if (value === null || value === undefined)
+        return <span className="gain-null">–</span>;
+      if (value === 0)
+        return <span className="gain-zero">±0</span>;
+      if (value > 0)
+        return <span className="gain-pos">+{value}</span>;
+      return <span className="gain-neg">{value}</span>;
+    }
+
+    function RankCell({ rank }) {
+      const cls = rank <= 3 ? `rank-${rank}` : '';
+      const label = rank <= 3
+        ? ['🥇','🥈','🥉'][rank - 1]
+        : rank;
+      return (
+        <td className={`td-rank ${cls}`}>
+          <span className="rank-medal">{label}</span>
+        </td>
+      );
+    }
+
+    function SortIcon({ active }) {
+      return <span style={{ marginLeft: 4, opacity: active ? 1 : 0.3, fontSize: 10 }}>▼</span>;
+    }
+
+    function Leaderboard({ skill }) {
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [sortBy, setSortBy] = useState('value');
+
+      useEffect(() => {
+        setLoading(true);
+        setData(null);
+        setSortBy('value');
+        fetch(`/api/leaderboard/${skill}`)
+          .then(r => r.json())
+          .then(d => { setData(d); setLoading(false); })
+          .catch(() => setLoading(false));
+      }, [skill]);
+
+      const info = SKILLS.find(s => s.key === skill);
+      const isFame = skill === 'life_fame';
+
+      const sorted = data ? [...data].sort((a, b) => {
+        if (sortBy === '7d')    return (b.gain_7d ?? -Infinity) - (a.gain_7d ?? -Infinity);
+        if (sortBy === 'month') return (b.gain_month ?? -Infinity) - (a.gain_month ?? -Infinity);
+        return a.rank - b.rank;
+      }).map((row, i) => ({ ...row, displayRank: i + 1 })) : [];
+
+      if (loading) return (
+        <div className="state-center">
+          <div className="spinner" />
+          <div className="state-label">Loading</div>
+        </div>
+      );
+
+      if (!data || data.length === 0) return (
+        <div className="state-center">
+          <div className="state-label">No data available</div>
+        </div>
+      );
+
+      return (
+        <>
+          <div className="skill-header">
+            <span className="skill-title">{info?.icon} {info?.label}</span>
+            <span className="skill-count">{data.length} members</span>
+          </div>
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th style={{width:60}}>#</th>
+                  <th>Name</th>
+                  <th
+                    className="num"
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => setSortBy('value')}
+                  >
+                    {isFame ? 'Life Fame' : 'Level'}<SortIcon active={sortBy === 'value'} />
+                  </th>
+                  <th
+                    className="num"
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => setSortBy('7d')}
+                  >
+                    +7 Days<SortIcon active={sortBy === '7d'} />
+                  </th>
+                  <th
+                    className="num"
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => setSortBy('month')}
+                  >
+                    This Month<SortIcon active={sortBy === 'month'} />
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((row, i) => (
+                  <tr key={row.name} style={{ animationDelay: `${i * 18}ms` }}>
+                    <RankCell rank={row.displayRank} />
+                    <td className="td-name">{row.name}</td>
+                    <td className="td-value">{row.display}</td>
+                    <td className="td-gain"><GainCell value={row.gain_7d} /></td>
+                    <td className="td-gain"><GainCell value={row.gain_month} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      );
+    }
+
+    function App() {
+      const [active, setActive] = useState('life_fame');
+      const [lastUpdate, setLastUpdate] = useState(null);
+
+      useEffect(() => {
+        fetch('/api/lastupdate')
+          .then(r => r.json())
+          .then(d => setLastUpdate(d.last));
+      }, []);
+
+      return (
+        <>
+          <header className="header">
+            <div className="header-eyebrow">Black Desert Online · EU</div>
+            <img src="/logo.png" alt="Clarity Guild Logo" className="guild-logo" />
+            <h1 className="header-title">CLARITY</h1>
+            <div className="header-sub">Guild Leaderboard</div>
+            {lastUpdate && (
+              <div className="last-update">Last updated: {lastUpdate}</div>
+            )}
+          </header>
+
+          <nav className="nav-wrapper">
+            <div className="nav-section-label">Overview</div>
+            <div className="nav-grid">
+              {SKILLS.filter(s => s.group === 'overview').map(s => (
+                <button
+                  key={s.key}
+                  className={`nav-btn nav-btn-fame ${active === s.key ? 'active' : ''}`}
+                  onClick={() => setActive(s.key)}
+                >
+                  {s.icon} {s.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="nav-section-label">Lifeskills</div>
+            <div className="nav-grid">
+              {SKILLS.filter(s => s.group === 'lifeskill').map(s => (
+                <button
+                  key={s.key}
+                  className={`nav-btn ${active === s.key ? 'active' : ''}`}
+                  onClick={() => setActive(s.key)}
+                >
+                  {s.icon} {s.label}
+                </button>
+              ))}
+            </div>
+          </nav>
+
+          <main className="content">
+            <Leaderboard key={active} skill={active} />
+          </main>
+        </>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
