@@ -15,13 +15,13 @@ const BDO_API = process.env.BDO_API_URL || 'http://bdo-api:8001';
 const GUILD = process.env.GUILD_NAME || 'clarity';
 const REGION = process.env.REGION || 'EU';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'changeme';
+const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK || '';
 
 const LIFESKILLS = [
   'gathering','fishing','hunting','cooking','alchemy',
   'processing','training','trading','farming','sailing','barter'
 ];
 
-// Numerische Felder (keine specLevel, direkt sortierbar)
 const NUMERIC_SKILLS = ['contribution_points', 'energy'];
 
 const RANK_OFFSETS = {
@@ -50,6 +50,17 @@ db.exec(`
   )
 `);
 
+// ── Discord Benachrichtigung ──────────────────────────────────────────────────
+async function sendDiscordAlert(message) {
+  if (!DISCORD_WEBHOOK) return;
+  try {
+    await axios.post(DISCORD_WEBHOOK, { content: message });
+    console.log('Discord Benachrichtigung gesendet.');
+  } catch (e) {
+    console.error('Discord Fehler:', e.message);
+  }
+}
+
 async function fetchWithRetry(url, params, retries = 8, delay = 8000) {
   for (let i = 0; i < retries; i++) {
     const res = await axios.get(url, { params });
@@ -62,6 +73,67 @@ async function fetchWithRetry(url, params, retries = 8, delay = 8000) {
   throw new Error(`Kein Ergebnis nach ${retries} Versuchen`);
 }
 
+// ── Einen einzelnen Scrape-Durchlauf ─────────────────────────────────────────
+async function scrapeOnce(targetDate, existingRows = []) {
+  const guild = await fetchWithRetry(`${BDO_API}/v1/guild`, {
+    guildName: GUILD, region: REGION
+  });
+
+  const members = guild?.members || [];
+  console.log(`Gefundene Mitglieder: ${members.length}`);
+
+  const alreadyScraped = new Set(existingRows.map(r => r.family_name));
+
+  const insert = db.prepare(`
+    INSERT OR REPLACE INTO snapshots
+      (date, family_name, life_fame, contribution_points, energy, ${LIFESKILLS.map(s => `spec_${s}`).join(', ')})
+    VALUES
+      (@date, @family_name, @life_fame, @contribution_points, @energy, ${LIFESKILLS.map(s => `@spec_${s}`).join(', ')})
+  `);
+
+  const insertMany = db.transaction((rows) => {
+    for (const row of rows) insert.run(row);
+  });
+
+  const rows = [...existingRows];
+  const failed = [];
+
+  for (const member of members) {
+    if (alreadyScraped.has(member.familyName)) continue;
+    try {
+      const profile = await fetchWithRetry(`${BDO_API}/v1/adventurer`, {
+        profileTarget: member.profileTarget, region: REGION
+      });
+
+      const spec = profile.specLevels || {};
+      const row = {
+        date: targetDate,
+        family_name: profile.familyName || member.familyName,
+        life_fame: profile.lifeFame || 0,
+        contribution_points: profile.contributionPoints || 0,
+        energy: profile.energy || 0,
+      };
+      for (const skill of LIFESKILLS) {
+        row[`spec_${skill}`] = spec[skill] || '';
+      }
+      rows.push(row);
+      alreadyScraped.add(row.family_name);
+      console.log(`✓ ${row.family_name}`);
+
+      await new Promise(r => setTimeout(r, 5000));
+    } catch (e) {
+      console.error(`✗ Fehler bei ${member.familyName}: ${e.message}`);
+      failed.push(member.familyName);
+    }
+  }
+
+  insertMany(rows);
+  console.log(`[${new Date().toISOString()}] ${rows.length}/${members.length} Spieler gespeichert für ${targetDate}.`);
+
+  return { total: members.length, saved: rows.length, failed };
+}
+
+// ── Hauptfunktion mit Retry-Logik ─────────────────────────────────────────────
 async function fetchAndStore(useYesterday = false) {
   const targetDate = useYesterday
     ? new Date(Date.now() - 86400000).toISOString().split('T')[0]
@@ -69,59 +141,66 @@ async function fetchAndStore(useYesterday = false) {
 
   console.log(`[${new Date().toISOString()}] Starte Datenabruf für ${targetDate}...`);
 
-  try {
-    const guild = await fetchWithRetry(`${BDO_API}/v1/guild`, {
-      guildName: GUILD, region: REGION
-    });
+  const MAX_ATTEMPTS = 3;
+  const RETRY_DELAY_MS = 5 * 60 * 1000; // 5 Minuten
 
-    const members = guild?.members || [];
-    console.log(`Gefundene Mitglieder: ${members.length}`);
+  let result = { total: 0, saved: 0, failed: [] };
+  let existingRows = [];
 
-    const insert = db.prepare(`
-      INSERT OR REPLACE INTO snapshots
-        (date, family_name, life_fame, contribution_points, energy, ${LIFESKILLS.map(s => `spec_${s}`).join(', ')})
-      VALUES
-        (@date, @family_name, @life_fame, @contribution_points, @energy, ${LIFESKILLS.map(s => `@spec_${s}`).join(', ')})
-    `);
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      console.log(`Versuch ${attempt}/${MAX_ATTEMPTS}...`);
+      result = await scrapeOnce(targetDate, existingRows);
 
-    const insertMany = db.transaction((rows) => {
-      for (const row of rows) insert.run(row);
-    });
+      if (result.saved >= result.total) {
+        console.log(`✅ Alle ${result.total} Spieler erfolgreich gespeichert.`);
+        await sendDiscordAlert(
+          `✅ **Clarity Leaderboard – Scrape erfolgreich**\n📅 Datum: ${targetDate}\n👥 Spieler gespeichert: ${result.saved}/${result.total}`
+        );
+        return;
+      }
 
-    const rows = [];
-    for (const member of members) {
-      try {
-        const profile = await fetchWithRetry(`${BDO_API}/v1/adventurer`, {
-          profileTarget: member.profileTarget, region: REGION
-        });
+      existingRows = db.prepare(`SELECT * FROM snapshots WHERE date = ?`).all(targetDate);
+      console.log(`⚠️ Nur ${result.saved}/${result.total} Spieler. Fehlend: ${result.failed.join(', ')}`);
 
-        const spec = profile.specLevels || {};
-        const row = {
-          date: targetDate,
-          family_name: profile.familyName || member.familyName,
-          life_fame: profile.lifeFame || 0,
-          contribution_points: profile.contributionPoints || 0,
-          energy: profile.energy || 0,
-        };
-        for (const skill of LIFESKILLS) {
-          row[`spec_${skill}`] = spec[skill] || '';
-        }
-        rows.push(row);
-        console.log(`✓ ${row.family_name}`);
-      } catch (e) {
-        console.error(`✗ Fehler bei ${member.familyName}: ${e.message}`);
+      if (attempt < MAX_ATTEMPTS) {
+        console.log(`Warte 5 Minuten bis Versuch ${attempt + 1}...`);
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+      }
+    } catch (e) {
+      console.error(`Fehler in Versuch ${attempt}: ${e.message}`);
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
       }
     }
+  }
 
-    insertMany(rows);
-    console.log(`[${new Date().toISOString()}] ${rows.length} Spieler gespeichert für ${targetDate}.`);
-  } catch (e) {
-    console.error('Fehler beim Datenabruf:', e.message);
+  // Nach 3 Versuchen immer noch unvollständig → Discord Alert
+  if (result.saved < result.total) {
+    const missing = result.total - result.saved;
+    await sendDiscordAlert(
+      `❌ **Clarity Leaderboard – Scrape fehlgeschlagen**\n📅 Datum: ${targetDate}\n👥 Gespeichert: ${result.saved}/${result.total}\n❌ Fehlende Spieler (${missing}): ${result.failed.join(', ')}`
+    );
   }
 }
 
-cron.schedule('0 2 * * *', () => fetchAndStore(true));
-fetchAndStore(false);
+let isRunning = false;
+
+async function fetchAndStoreSafe(useYesterday = false) {
+  if (isRunning) {
+    console.log('Scrape läuft bereits, Anfrage ignoriert.');
+    return;
+  }
+  isRunning = true;
+  try {
+    await fetchAndStore(useYesterday);
+  } finally {
+    isRunning = false;
+  }
+}
+
+// Cron deaktiviert – Scraping läuft via GitHub Actions (.github/workflows/daily-scrape.yml)
+// cron.schedule('0 2 * * *', () => fetchAndStoreSafe(true));
 
 function calcGain(current, past) {
   if (past == null || past === '') return null;
@@ -163,7 +242,6 @@ app.get('/api/leaderboard/:skill', (req, res) => {
   const date7d = best7d?.date || null;
   const dateMonth = bestMonth?.date || null;
 
-  // Numerische Felder: life_fame, contribution_points, energy
   if (skill === 'life_fame' || NUMERIC_SKILLS.includes(skill)) {
     const rows = db.prepare(`
       SELECT
@@ -187,7 +265,6 @@ app.get('/api/leaderboard/:skill', (req, res) => {
     })));
   }
 
-  // Lifeskills: specLevel strings
   const rows = db.prepare(`
     SELECT
       t.family_name,
@@ -230,7 +307,37 @@ app.post('/api/admin/fetch', async (req, res) => {
     : new Date().toISOString().split('T')[0];
 
   res.json({ message: `Scrape gestartet für ${targetDate}` });
-  fetchAndStore(useYesterday);
+  fetchAndStoreSafe(useYesterday);
+});
+
+app.post('/api/admin/bulk-snapshot', (req, res) => {
+  const token = req.headers['x-admin-token'];
+  if (!token || token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const { date, snapshots } = req.body;
+  if (!date || !Array.isArray(snapshots) || snapshots.length === 0) {
+    return res.status(400).json({ error: 'date und snapshots[] erforderlich' });
+  }
+
+  const insert = db.prepare(`
+    INSERT OR REPLACE INTO snapshots
+      (date, family_name, life_fame, contribution_points, energy, ${LIFESKILLS.map(s => `spec_${s}`).join(', ')})
+    VALUES
+      (@date, @family_name, @life_fame, @contribution_points, @energy, ${LIFESKILLS.map(s => `@spec_${s}`).join(', ')})
+  `);
+
+  const insertMany = db.transaction((rows) => {
+    for (const row of rows) insert.run({ ...row, date });
+  });
+
+  insertMany(snapshots);
+
+  const missing = snapshots.filter(s => !s.family_name).length;
+  console.log(`[${new Date().toISOString()}] bulk-snapshot: ${snapshots.length} Spieler für ${date} gespeichert.`);
+
+  res.json({ saved: snapshots.length, date });
 });
 
 app.get('*', (req, res) => {

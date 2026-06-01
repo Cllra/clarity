@@ -1,3 +1,4 @@
 .env
 data/
 backend/node_modules/
+scraper/node_modules/
