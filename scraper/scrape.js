@@ -106,7 +106,7 @@ async function main() {
   console.log(`\nSende ${snapshots.length}/${total} Snapshots an Server...`);
   const res = await axios.post(
     `${SERVER_URL}/api/admin/bulk-snapshot`,
-    { date: targetDate, snapshots },
+    { date: targetDate, snapshots, failed },
     { headers: { 'x-admin-token': ADMIN_TOKEN }, timeout: 30000 }
   );
   console.log(`✅ ${res.data.saved} Snapshots gespeichert für ${targetDate}`);

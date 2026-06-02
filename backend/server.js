@@ -310,13 +310,13 @@ app.post('/api/admin/fetch', async (req, res) => {
   fetchAndStoreSafe(useYesterday);
 });
 
-app.post('/api/admin/bulk-snapshot', (req, res) => {
+app.post('/api/admin/bulk-snapshot', async (req, res) => {
   const token = req.headers['x-admin-token'];
   if (!token || token !== ADMIN_TOKEN) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const { date, snapshots } = req.body;
+  const { date, snapshots, failed = [] } = req.body;
   if (!date || !Array.isArray(snapshots) || snapshots.length === 0) {
     return res.status(400).json({ error: 'date und snapshots[] erforderlich' });
   }
@@ -334,8 +334,18 @@ app.post('/api/admin/bulk-snapshot', (req, res) => {
 
   insertMany(snapshots);
 
-  const missing = snapshots.filter(s => !s.family_name).length;
+  const total = snapshots.length + failed.length;
   console.log(`[${new Date().toISOString()}] bulk-snapshot: ${snapshots.length} Spieler für ${date} gespeichert.`);
+
+  if (failed.length === 0) {
+    await sendDiscordAlert(
+      `✅ **Clarity Leaderboard – Scrape erfolgreich**\n📅 Datum: ${date}\n👥 Spieler gespeichert: ${snapshots.length}/${total}`
+    );
+  } else {
+    await sendDiscordAlert(
+      `⚠️ **Clarity Leaderboard – Scrape unvollständig**\n📅 Datum: ${date}\n👥 Gespeichert: ${snapshots.length}/${total}\n❌ Fehlend (${failed.length}): ${failed.join(', ')}`
+    );
+  }
 
   res.json({ saved: snapshots.length, date });
 });
