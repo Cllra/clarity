@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -482,7 +482,7 @@
 
       if (!data || data.length === 0) return (
         <div className="state-center">
-          <div className="state-label">Noch keine Daten — Pool leer oder Scrape läuft noch</div>
+          <div className="state-label">No data yet — pool empty or scrape still running</div>
         </div>
       );
 
@@ -490,7 +490,7 @@
         <>
           <div className="skill-header">
             <span className="skill-title">{info?.icon} {info?.label}</span>
-            <span className="skill-count">{data.length} Spieler im Pool</span>
+            <span className="skill-count">{data.length} players in pool</span>
           </div>
           <div className="table-wrapper">
             <table>
@@ -503,7 +503,7 @@
                     Level <SortIcon active={sortBy==='value'} />
                   </th>
                   <th className="num" style={{cursor:'pointer',userSelect:'none'}} onClick={() => setSortBy('7d')}>
-                    +7 Tage <SortIcon active={sortBy==='7d'} />
+                    +7 Days <SortIcon active={sortBy==='7d'} />
                   </th>
                   <th className="num" style={{cursor:'pointer',userSelect:'none'}} onClick={() => setSortBy('month')}>
                     This Month <SortIcon active={sortBy==='month'} />
@@ -547,14 +547,14 @@
           const res = await fetch(`/api/global/player/search?name=${encodeURIComponent(name)}&region=${region}`);
           const data = await res.json();
           if (!res.ok) {
-            setMessage({ type: 'err', text: `Suche nicht verfügbar: ${data.error || 'BDO API nicht erreichbar'}` });
+            setMessage({ type: 'err', text: `Search unavailable: ${data.error || 'BDO API unreachable'}` });
           } else {
             const list = Array.isArray(data) ? data : (data.list || []);
             setResults(list);
-            if (list.length === 0) setMessage({ type: 'err', text: 'Keine Treffer' });
+            if (list.length === 0) setMessage({ type: 'err', text: 'No results found' });
           }
         } catch (e) {
-          setMessage({ type: 'err', text: 'Verbindungsfehler' });
+          setMessage({ type: 'err', text: 'Connection error' });
         }
         setSearching(false);
       }
@@ -568,22 +568,22 @@
             body: JSON.stringify({ profileTarget, region: r }),
           });
           const data = await res.json();
-          if (data.added) setMessage({ type: 'ok', text: `✓ Spieler zum Pool hinzugefügt — wird beim nächsten Scrape erfasst` });
-          else setMessage({ type: 'ok', text: `Spieler ist bereits im Pool` });
+          if (data.added) setMessage({ type: 'ok', text: `✓ Player added to pool — will be captured in the next scrape` });
+          else setMessage({ type: 'ok', text: `Player is already in the pool` });
           setResults(null);
           setName('');
         } catch (e) {
-          setMessage({ type: 'err', text: 'Fehler beim Hinzufügen' });
+          setMessage({ type: 'err', text: 'Error adding player' });
         }
       }
 
       return (
         <div className="add-section">
-          <div className="add-title">Spieler zum Pool hinzufügen</div>
+          <div className="add-title">Add Player to Pool</div>
           <div className="add-row">
             <input
               className="add-input"
-              placeholder="Familien-Name suchen..."
+              placeholder="Search family name..."
               value={name}
               onChange={e => setName(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSearch()}
@@ -594,7 +594,7 @@
               ))}
             </select>
             <button className="add-btn" onClick={handleSearch} disabled={searching || !name.trim()}>
-              {searching ? 'Suche...' : 'Suchen'}
+              {searching ? 'Searching...' : 'Search'}
             </button>
           </div>
 
@@ -608,7 +608,7 @@
                     className="add-result-btn"
                     onClick={() => handleAdd(r.profileTarget || r.profile_target, r.region || region)}
                   >
-                    + Hinzufügen
+                    + Add
                   </button>
                 </div>
               ))}
@@ -640,8 +640,8 @@
             <div className="header-sub">Global Leaderboard</div>
             {stats && (
               <div className="header-stats">
-                {stats.total_players} Spieler im Pool
-                {stats.latest_date ? ` · Stand: ${stats.latest_date}` : ' · Noch kein Scrape'}
+                {stats.total_players} players in pool
+                {stats.latest_date ? ` · As of: ${stats.latest_date}` : ' · No scrape yet'}
               </div>
             )}
           </header>
