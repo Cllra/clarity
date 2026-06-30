@@ -4,7 +4,9 @@ const SERVER_URL  = process.env.CLARITY_SERVER_URL || 'https://clarity-guild.liv
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
 const BASE         = 'https://www.timestorm.de/';
-const ASIAN_REGIONS = new Set(['KR', 'JP', 'TW', 'AS', 'TR']);
+const ASIAN_REGIONS = process.env.ALL_REGIONS === '1'
+  ? null  // null = alle Regionen
+  : new Set(['KR', 'JP', 'TW', 'AS', 'TR']);
 const REGION_MAP   = { AS: 'ASIA' };
 
 const SKILL_PAGES = [
@@ -40,7 +42,7 @@ function parseRows(html) {
     const rawRegion  = m[1].toUpperCase();
     const familyName = m[2].trim();
     const score      = m[3].trim();
-    if (ASIAN_REGIONS.has(rawRegion) && familyName) {
+    if ((!ASIAN_REGIONS || ASIAN_REGIONS.has(rawRegion)) && familyName) {
       const region = REGION_MAP[rawRegion] || rawRegion;
       results.push({ familyName, region, score });
     }

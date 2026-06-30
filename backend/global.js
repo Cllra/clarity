@@ -309,6 +309,9 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
     const markInactive = db.prepare(
       `UPDATE tracked_players SET active = 0 WHERE profile_target = ?`
     );
+    const deleteTsSnap = db.prepare(
+      `DELETE FROM global_snapshots WHERE date = ? AND profile_target = ?`
+    );
 
     db.transaction(() => {
       for (const snap of snapshots) {
@@ -326,6 +329,8 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
 
         insertSnap.run({ date, ...snap });
         updatePlayer.run({ date, family_name: snap.family_name, changed: changed ? 1 : 0, tier, profile_target: snap.profile_target });
+        // Timestorm-Platzhalter für diesen Spieler entfernen, falls vorhanden
+        deleteTsSnap.run(date, `ts:${snap.region}:${snap.family_name}`);
       }
 
       for (const pt of failed) {
@@ -376,15 +381,15 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
          ${LIFESKILLS.map(s => `@spec_${s}`).join(', ')})
     `);
 
-    const hasRealPT = db.prepare(
-      "SELECT id FROM tracked_players WHERE family_name = ? AND region = ? AND profile_target IS NOT NULL AND profile_target NOT LIKE 'ts:%'"
+    // Nur überspringen wenn für HEUTE bereits ein echter (nicht-ts:) Snapshot existiert
+    const hasTodaySnap = db.prepare(
+      "SELECT id FROM global_snapshots WHERE date = ? AND profile_target NOT LIKE 'ts:%' AND family_name = ? AND region = ?"
     );
 
     let skipped = 0;
     db.transaction(() => {
       for (const p of players) {
-        // Spieler die bereits via bdo-api aufgelöst wurden überspringen (bessere Daten)
-        if (hasRealPT.get(p.familyName, p.region)) { skipped++; continue; }
+        if (hasTodaySnap.get(date, p.familyName, p.region)) { skipped++; continue; }
 
         const pt = `ts:${p.region}:${p.familyName}`;
         upsertPlayer.run(pt, p.familyName, p.region, date, date);
