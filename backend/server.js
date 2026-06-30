@@ -4,6 +4,7 @@ const cron = require('node-cron');
 const axios = require('axios');
 const cors = require('cors');
 const path = require('path');
+const createGlobalRouter = require('./global');
 
 const app = express();
 app.use(cors());
@@ -348,6 +349,15 @@ app.post('/api/admin/bulk-snapshot', async (req, res) => {
   }
 
   res.json({ saved: snapshots.length, date });
+});
+
+// ── Global Leaderboard (additiv, rückbaubar) ──────────────────────────────────
+const globalRouter = createGlobalRouter({ db, BDO_API, ADMIN_TOKEN });
+app.use('/api/global', globalRouter);
+
+// /world-Route vor dem Catch-all
+app.get('/world', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'world.html'));
 });
 
 app.get('*', (req, res) => {

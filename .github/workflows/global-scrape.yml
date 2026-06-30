@@ -1,0 +1,53 @@
+name: Global Scrape
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 3 AM UTC täglich (nach Clarity-Scrape um 2 AM)
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Datum (YYYY-MM-DD), leer = gestern'
+        required: false
+        default: ''
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180   # großer Pool kann länger dauern
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Docker-Netzwerk erstellen
+        run: docker network create clarity-net
+
+      - name: Redis starten
+        run: |
+          docker run -d --name clarity-redis \
+            --network clarity-net \
+            redis:7-alpine
+
+      - name: bdo-api starten
+        run: |
+          docker run -d --name bdo-api \
+            --network clarity-net \
+            -p 8001:8001 \
+            man90/bdo-rest-api:latest \
+            -redis redis://clarity-redis:6379/0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Abhängigkeiten installieren
+        run: npm install
+        working-directory: scraper
+
+      - name: Globalen Scraper ausführen
+        run: node scrape-global.js
+        working-directory: scraper
+        env:
+          BDO_API_URL: http://localhost:8001
+          CLARITY_SERVER_URL: https://clarity-guild.live
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          TARGET_DATE: ${{ github.event.inputs.date }}

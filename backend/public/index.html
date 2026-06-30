@@ -56,6 +56,26 @@
       position: relative;
     }
 
+    /* clarity-vs-world button -- einziger Eingriff, leicht entfernbar */
+    .world-btn {
+      position: absolute;
+      top: 24px;
+      right: 24px;
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      padding: 8px 14px;
+      text-decoration: none;
+      clip-path: polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%);
+      transition: all 0.2s;
+    }
+    .world-btn:hover { color: var(--gold); border-color: var(--gold-dim); }
+
     .header::after {
       content: '';
       display: block;
@@ -498,6 +518,7 @@
       return (
         <>
           <header className="header">
+            <a href="/world" className="world-btn">🌍 vs World</a>
             <div className="header-eyebrow">Black Desert Online · EU</div>
             <img src="/logo.png" alt="Clarity Guild Logo" className="guild-logo" />
             <h1 className="header-title">CLARITY</h1>
