@@ -65,8 +65,9 @@ async function main() {
     return;
   }
 
-  const snapshots = [];
-  const failed    = [];  // profile_targets für Inaktiv-Markierung
+  const snapshots    = [];
+  const failed       = [];  // profile_targets: transient failures (retry later)
+  const unresolvable = [];  // {familyName, region}: permanent 400 from search → deactivate
 
   for (const player of players) {
     let profileTarget = player.profile_target;
@@ -87,7 +88,14 @@ async function main() {
         );
         await sleep(3000);
       } catch (e) {
-        console.error(`✗ [${player.region}] ${player.family_name} (resolve): ${e.message}`);
+        if (e.response?.status === 400) {
+          // Permanenter Fehler: Search-Endpoint unterstützt diese Region/Zeichen nicht
+          console.error(`✗ [${player.region}] ${player.family_name} (resolve, dauerhaft): ${e.message}`);
+          unresolvable.push({ familyName: player.family_name, region: player.region });
+        } else {
+          // Transient (Timeout, Netzwerk etc.)
+          console.error(`✗ [${player.region}] ${player.family_name} (resolve): ${e.message}`);
+        }
         continue;
       }
     }
@@ -125,10 +133,10 @@ async function main() {
   console.log(`\nSende ${snapshots.length}/${players.length} Snapshots...`);
   const res = await axios.post(
     `${SERVER_URL}/api/global/admin/bulk-snapshot`,
-    { date, snapshots, failed },
+    { date, snapshots, failed, unresolvable },
     { headers: { 'x-admin-token': ADMIN_TOKEN }, timeout: 60000 }
   );
-  console.log(`✅ ${res.data.saved} gespeichert, ${res.data.failed} fehlgeschlagen für ${date}`);
+  console.log(`✅ ${res.data.saved} gespeichert, ${res.data.failed} fehlgeschlagen, ${res.data.deactivated} deaktiviert für ${date}`);
 
   if (failed.length > 0) {
     console.log(`Fehlgeschlagen: ${failed.join(', ')}`);

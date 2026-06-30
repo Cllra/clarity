@@ -43,7 +43,7 @@ jobs:
         run: npm install
         working-directory: scraper
 
-      - name: Globalen Scraper ausführen
+      - name: Globalen Scraper ausführen (EU/NA/SA)
         run: node scrape-global.js
         working-directory: scraper
         env:
@@ -51,3 +51,10 @@ jobs:
           CLARITY_SERVER_URL: https://clarity-guild.live
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
           TARGET_DATE: ${{ github.event.inputs.date }}
+
+      - name: Asiatische Spieler von timestorm.de scrapen
+        run: node scrape-timestorm-asian.js
+        working-directory: scraper
+        env:
+          CLARITY_SERVER_URL: https://clarity-guild.live
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}

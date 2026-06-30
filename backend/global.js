@@ -267,6 +267,7 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
       SELECT profile_target, region, family_name, scrape_tier
       FROM tracked_players
       WHERE active = 1
+      AND (source IS NULL OR source != 'timestorm')
       AND (
         (scrape_tier = 'daily'  AND (last_scraped IS NULL OR last_scraped < ?))
         OR
@@ -282,7 +283,7 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
     const token = req.headers['x-admin-token'];
     if (!token || token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { date, snapshots = [], failed = [] } = req.body;
+    const { date, snapshots = [], failed = [], unresolvable = [] } = req.body;
     if (!date) return res.status(400).json({ error: 'date required' });
 
     const insertSnap = db.prepare(`
@@ -334,10 +335,68 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
           if (days >= 3) markInactive.run(pt);
         }
       }
+
+      // Spieler die dauerhaft nicht auflösbar sind (400 vom Search-Endpoint) → deaktivieren
+      const deactivateByName = db.prepare(
+        'UPDATE tracked_players SET active = 0 WHERE family_name = ? AND region = ? AND profile_target IS NULL'
+      );
+      for (const { familyName, region } of unresolvable) {
+        deactivateByName.run(familyName, region);
+      }
     })();
 
-    console.log(`[${new Date().toISOString()}] global bulk-snapshot: ${snapshots.length} gespeichert, ${failed.length} fehlgeschlagen für ${date}`);
-    res.json({ saved: snapshots.length, failed: failed.length, date });
+    console.log(`[${new Date().toISOString()}] global bulk-snapshot: ${snapshots.length} gespeichert, ${failed.length} fehlgeschlagen, ${unresolvable.length} deaktiviert für ${date}`);
+    res.json({ saved: snapshots.length, failed: failed.length, deactivated: unresolvable.length, date });
+  });
+
+  // ── POST /admin/timestorm-snapshot (Asiatische Spieler direkt von timestorm.de) ─
+  router.post('/admin/timestorm-snapshot', (req, res) => {
+    const token = req.headers['x-admin-token'];
+    if (!token || token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { date, players = [] } = req.body;
+    if (!date) return res.status(400).json({ error: 'date required' });
+
+    const upsertPlayer = db.prepare(`
+      INSERT INTO tracked_players (profile_target, family_name, region, added_on, source, active, last_scraped)
+      VALUES (?, ?, ?, ?, 'timestorm', 1, ?)
+      ON CONFLICT(profile_target) DO UPDATE SET
+        active       = 1,
+        last_scraped = excluded.last_scraped
+    `);
+
+    const insertSnap = db.prepare(`
+      INSERT OR REPLACE INTO global_snapshots
+        (date, profile_target, family_name, region,
+         life_fame, contribution_points, energy,
+         ${LIFESKILLS.map(s => `spec_${s}`).join(', ')})
+      VALUES
+        (@date, @profile_target, @family_name, @region,
+         @life_fame, @contribution_points, @energy,
+         ${LIFESKILLS.map(s => `@spec_${s}`).join(', ')})
+    `);
+
+    db.transaction(() => {
+      for (const p of players) {
+        const pt = `ts:${p.region}:${p.familyName}`;
+        upsertPlayer.run(pt, p.familyName, p.region, date, date);
+
+        const snap = {
+          date,
+          profile_target:      pt,
+          family_name:         p.familyName,
+          region:              p.region,
+          life_fame:           p.life_fame || 0,
+          contribution_points: 0,
+          energy:              0,
+        };
+        for (const s of LIFESKILLS) snap[`spec_${s}`] = p[`spec_${s}`] || '';
+        insertSnap.run(snap);
+      }
+    })();
+
+    console.log(`[${new Date().toISOString()}] timestorm-snapshot: ${players.length} asiatische Spieler für ${date}`);
+    res.json({ saved: players.length, date });
   });
 
   return router;
