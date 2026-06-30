@@ -22,29 +22,41 @@ const axios = require('axios');
 const SERVER_URL  = process.env.CLARITY_SERVER_URL || 'https://clarity-guild.live';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
-// ── Anpassen: echte timestorm.de-URLs eintragen ──────────────────────────────
+// ── timestorm.de Ranglisten ───────────────────────────────────────────────────
+const BASE = 'https://www.timestorm.de/';
 const SEED_PAGES = [
-  { url: 'https://www.timestorm.de/', label: 'Life Fame EU', region: 'EU' },
-  // { url: 'https://www.timestorm.de/lifeskills?skill=cooking', label: 'Cooking EU', region: 'EU' },
-  // weitere Seiten hier...
+  { url: BASE + '?mode=lifefame',       label: 'Life Fame'    },
+  { url: BASE + '?mode=lifegathering',  label: 'Gathering'    },
+  { url: BASE + '?mode=lifefishing',    label: 'Fishing'      },
+  { url: BASE + '?mode=lifehunting',    label: 'Hunting'      },
+  { url: BASE + '?mode=lifecooking',    label: 'Cooking'      },
+  { url: BASE + '?mode=lifealchemy',    label: 'Alchemy'      },
+  { url: BASE + '?mode=lifeprocessing', label: 'Processing'   },
+  { url: BASE + '?mode=lifetraining',   label: 'Training'     },
+  { url: BASE + '?mode=lifetrade',      label: 'Trading'      },
+  { url: BASE + '?mode=lifefarming',    label: 'Farming'      },
+  { url: BASE + '?mode=lifesailing',    label: 'Sailing'      },
+  { url: BASE + '?mode=lifebarter',     label: 'Barter'       },
 ];
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Extrahiert { profileTarget, region } aus HTML
-// Passe den Regex an die tatsächliche timestorm.de URL-Struktur an
-function extractTargets(html, fallbackRegion) {
+// Format auf timestorm.de: <REGION><32 hex chars>, z.B. EU2add931a82368b07c890a4cca74777f8
+// "AS" ist ihre Abkürzung für ASIA
+const REGION_MAP = { AS: 'ASIA' };
+
+function extractTargets(html) {
   const results = [];
   const seen = new Set();
-  // Beispiel-Pattern: ?mode=EU1a2b3c4d...  oder  ?mode=eu1a2b3c4d
-  const regex = /[?&]mode=([A-Za-z]{2,4})([A-Za-z0-9_\-]{10,})/g;
+  const regex = /\b([A-Z]{2,4})([0-9a-f]{32})\b/g;
   let m;
   while ((m = regex.exec(html)) !== null) {
-    const region = m[1].toUpperCase();
-    const hash   = m[2];
-    const key    = `${region}:${hash}`;
+    const rawRegion = m[1];
+    const hash      = m[2];
+    const region    = REGION_MAP[rawRegion] || rawRegion;
+    const key       = hash;
     if (!seen.has(key)) {
       seen.add(key);
-      results.push({ profileTarget: hash, region: region || fallbackRegion });
+      results.push({ profileTarget: hash, region });
     }
   }
   return results;
@@ -52,21 +64,17 @@ function extractTargets(html, fallbackRegion) {
 
 async function main() {
   if (!ADMIN_TOKEN) throw new Error('ADMIN_TOKEN nicht gesetzt');
-  if (SEED_PAGES.every(p => p.url.includes('timestorm.de/'))) {
-    console.warn('⚠ Hinweis: Echte timestorm.de-URLs noch nicht eingetragen. SEED_PAGES anpassen.');
-  }
-
   const allTargets = new Map(); // profileTarget → region
   let added = 0;
 
-  for (const { url, label, region } of SEED_PAGES) {
+  for (const { url, label } of SEED_PAGES) {
     console.log(`Lade ${label} von ${url}...`);
     try {
       const res = await axios.get(url, {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; clarity-seed/1.0; +https://clarity-guild.live)' },
         timeout: 30000
       });
-      const targets = extractTargets(res.data, region);
+      const targets = extractTargets(res.data);
       console.log(`  ${targets.length} Profile-Hashes gefunden`);
       for (const t of targets) allTargets.set(t.profileTarget, t.region);
     } catch (e) {

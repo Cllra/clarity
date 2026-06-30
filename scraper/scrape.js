@@ -35,6 +35,15 @@ async function scrape(targetDate) {
   if (members.length === 0) throw new Error('Keine Guild-Mitglieder gefunden');
   console.log(`${members.length} Mitglieder`);
 
+  // Clarity-Mitglieder in globalen Pool einspeisen (silent, kein Fehler wenn schon drin)
+  for (const member of members) {
+    if (!member.profileTarget) continue;
+    axios.post(`${SERVER_URL}/api/global/player/add`,
+      { profileTarget: member.profileTarget, region: REGION, source: 'clarity' },
+      { headers: { 'x-admin-token': ADMIN_TOKEN }, timeout: 5000 }
+    ).catch(() => {});
+  }
+
   const snapshots = [];
   const failed = [];
 
