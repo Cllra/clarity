@@ -384,8 +384,9 @@
       letter-spacing: 1px;
       color: var(--text-dim);
     }
-    .add-message.ok  { color: var(--green); }
-    .add-message.err { color: var(--red); }
+    .add-message.ok   { color: var(--green); }
+    .add-message.err  { color: var(--red); }
+    .add-message.warn { color: var(--gold); }
 
     /* ── State ── */
     .state-center { text-align: center; padding: 80px 24px; color: var(--text-dim); }
@@ -540,29 +541,55 @@
     }
 
     function AddPlayer() {
-      const [name, setName]           = useState('');
-      const [region, setRegion]       = useState('EU');
-      const [searching, setSearching] = useState(false);
-      const [results, setResults]     = useState(null);
-      const [message, setMessage]     = useState(null);
+      const [name, setName]               = useState('');
+      const [region, setRegion]           = useState('EU');
+      const [searching, setSearching]     = useState(false);
+      const [results, setResults]         = useState(null);
+      const [message, setMessage]         = useState(null);
+      const [canAddByName, setCanAddByName] = useState(false);
 
       async function handleSearch() {
         if (!name.trim()) return;
         setSearching(true);
         setResults(null);
         setMessage(null);
+        setCanAddByName(false);
+
+        // 1. Check local pool first (no bdo-api needed)
         try {
-          const res = await fetch(`/api/global/player/search?name=${encodeURIComponent(name)}&region=${region}`);
+          const chk = await fetch(`/api/global/player/check?name=${encodeURIComponent(name.trim())}&region=${region}`);
+          const chkData = await chk.json();
+          if (chkData.status === 'has_data') {
+            setMessage({ type: 'ok', text: `✓ ${name} (${region}) is already in the leaderboard.` });
+            setSearching(false);
+            return;
+          }
+          if (chkData.status === 'queued') {
+            setMessage({ type: 'ok', text: `${name} (${region}) is already queued — data will appear after the next scrape (3 AM UTC).` });
+            setSearching(false);
+            return;
+          }
+        } catch (e) {}
+
+        // 2. Try bdo-api search
+        try {
+          const res = await fetch(`/api/global/player/search?name=${encodeURIComponent(name.trim())}&region=${region}`);
           const data = await res.json();
-          if (!res.ok) {
-            setMessage({ type: 'err', text: `Search unavailable: ${data.error || 'BDO API unreachable'}` });
+          if (res.status === 503 || res.status === 502 || data.error === 'bdo_unavailable') {
+            setMessage({ type: 'warn', text: `BDO API is currently unavailable from the server. You can still add "${name}" to the queue by name — the profile will be resolved at the next scrape.` });
+            setCanAddByName(true);
+          } else if (!res.ok) {
+            setMessage({ type: 'err', text: `Search error: ${data.error}` });
           } else {
             const list = Array.isArray(data) ? data : (data.list || []);
-            setResults(list);
-            if (list.length === 0) setMessage({ type: 'err', text: 'No results found' });
+            if (list.length === 0) {
+              setMessage({ type: 'err', text: `No player found with name "${name}" in ${region}.` });
+            } else {
+              setResults(list);
+            }
           }
         } catch (e) {
-          setMessage({ type: 'err', text: 'Connection error' });
+          setMessage({ type: 'err', text: 'Connection error.' });
         }
         setSearching(false);
       }
@@ -576,12 +603,30 @@
             body: JSON.stringify({ profileTarget, region: r }),
           });
           const data = await res.json();
-          if (data.added) setMessage({ type: 'ok', text: `✓ Player added to pool — will be captured in the next scrape` });
-          else setMessage({ type: 'ok', text: `Player is already in the pool` });
+          if (data.added) setMessage({ type: 'ok', text: `✓ ${name} added to pool — will appear after the next scrape.` });
+          else setMessage({ type: 'ok', text: `${name} is already in the pool.` });
           setResults(null);
+          setCanAddByName(false);
           setName('');
         } catch (e) {
-          setMessage({ type: 'err', text: 'Error adding player' });
+          setMessage({ type: 'err', text: 'Error adding player.' });
+        }
+      }
+
+      async function handleAddByName() {
+        try {
+          const res = await fetch('/api/global/player/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ familyName: name.trim(), region }),
+          });
+          const data = await res.json();
+          if (data.added) setMessage({ type: 'ok', text: `✓ ${name} (${region}) added to queue — data will appear after the next scrape.` });
+          else setMessage({ type: 'ok', text: `${name} (${region}) is already in the pool.` });
+          setCanAddByName(false);
+          setName('');
+        } catch (e) {
+          setMessage({ type: 'err', text: 'Error adding player.' });
         }
       }
 
@@ -591,9 +636,9 @@
           <div className="add-row">
             <input
               className="add-input"
-              placeholder="Search family name..."
+              placeholder="Family name..."
               value={name}
-              onChange={e => setName(e.target.value)}
+              onChange={e => { setName(e.target.value); setMessage(null); setResults(null); setCanAddByName(false); }}
               onKeyDown={e => e.key === 'Enter' && handleSearch()}
             />
             <select className="add-select" value={region} onChange={e => setRegion(e.target.value)}>
@@ -607,7 +652,7 @@
           </div>
 
           <div className="add-hint">
-            Search by family name and select a region, then click + Add. The player will appear in the leaderboard after the next daily scrape (3 AM UTC). EU · NA · SA only — KR/JP/TW/ASIA/TR players are added automatically.
+            Enter an exact family name and region. EU · NA · SA only — KR/JP/TW/ASIA/TR players are tracked automatically via timestorm.de.
           </div>
 
           {results && results.length > 0 && (
@@ -625,6 +670,12 @@
                 </div>
               ))}
             </div>
+          )}
+
+          {canAddByName && (
+            <button className="add-btn" style={{marginTop:10}} onClick={handleAddByName}>
+              + Add "{name}" to queue anyway
+            </button>
           )}
 
           {message && (

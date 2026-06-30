@@ -181,6 +181,28 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
     res.json({ total_players: total, daily_players: daily, latest_date: latest });
   });
 
+  // ── GET /player/check (local pool lookup, no bdo-api) ────────────────────────
+  router.get('/player/check', (req, res) => {
+    const { name, region } = req.query;
+    if (!name || !region) return res.status(400).json({ error: 'name and region required' });
+
+    const tracked = db.prepare(
+      `SELECT profile_target, last_scraped FROM tracked_players WHERE family_name = ? AND region = ? AND active = 1`
+    ).get(name, region);
+
+    if (!tracked) return res.json({ status: 'not_tracked' });
+
+    const latestDate = db.prepare('SELECT MAX(date) as d FROM global_snapshots').get()?.d;
+    const hasSnap = latestDate && db.prepare(
+      `SELECT 1 FROM global_snapshots WHERE date = ? AND (profile_target = ? OR (family_name = ? AND region = ?))`
+    ).get(latestDate, tracked.profile_target || '', name, region);
+
+    return res.json({
+      status: hasSnap ? 'has_data' : 'queued',
+      last_scraped: tracked.last_scraped,
+    });
+  });
+
   // ── GET /player/search ────────────────────────────────────────────────────────
   router.get('/player/search', async (req, res) => {
     const { name, region = 'EU' } = req.query;
@@ -189,9 +211,12 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
       const r = await axios.get(`${BDO_API}/v1/adventurer/search`, {
         params: { query: name, region }, timeout: 15000
       });
+      if (r.data?.status === 'started' || r.data?.status === 'pending') {
+        return res.status(503).json({ error: 'bdo_unavailable' });
+      }
       res.json(r.data);
     } catch (e) {
-      res.status(502).json({ error: 'BDO API nicht erreichbar', detail: e.message });
+      res.status(502).json({ error: 'bdo_unavailable', detail: e.message });
     }
   });
 
