@@ -376,8 +376,16 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
          ${LIFESKILLS.map(s => `@spec_${s}`).join(', ')})
     `);
 
+    const hasRealPT = db.prepare(
+      "SELECT id FROM tracked_players WHERE family_name = ? AND region = ? AND profile_target IS NOT NULL AND profile_target NOT LIKE 'ts:%'"
+    );
+
+    let skipped = 0;
     db.transaction(() => {
       for (const p of players) {
+        // Spieler die bereits via bdo-api aufgelöst wurden überspringen (bessere Daten)
+        if (hasRealPT.get(p.familyName, p.region)) { skipped++; continue; }
+
         const pt = `ts:${p.region}:${p.familyName}`;
         upsertPlayer.run(pt, p.familyName, p.region, date, date);
 
@@ -395,8 +403,9 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
       }
     })();
 
-    console.log(`[${new Date().toISOString()}] timestorm-snapshot: ${players.length} asiatische Spieler für ${date}`);
-    res.json({ saved: players.length, date });
+    const saved = players.length - skipped;
+    console.log(`[${new Date().toISOString()}] timestorm-snapshot: ${saved} gespeichert, ${skipped} übersprungen (bereits via bdo-api) für ${date}`);
+    res.json({ saved, skipped, date });
   });
 
   return router;
