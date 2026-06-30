@@ -58,3 +58,4 @@ jobs:
         env:
           CLARITY_SERVER_URL: https://clarity-guild.live
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          TARGET_DATE: ${{ github.event.inputs.date }}

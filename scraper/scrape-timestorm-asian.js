@@ -2,6 +2,7 @@ const axios = require('axios');
 
 const SERVER_URL  = process.env.CLARITY_SERVER_URL || 'https://clarity-guild.live';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+const TARGET_DATE = process.env.TARGET_DATE || null;
 
 const BASE         = 'https://www.timestorm.de/';
 const ASIAN_REGIONS = process.env.ALL_REGIONS === '1'
@@ -53,7 +54,7 @@ function parseRows(html) {
 async function main() {
   if (!ADMIN_TOKEN) throw new Error('ADMIN_TOKEN nicht gesetzt');
 
-  const date = new Date().toISOString().split('T')[0];
+  const date = TARGET_DATE || new Date(Date.now() - 86400000).toISOString().split('T')[0];
   console.log(`Timestorm Asian Scrape für ${date}`);
 
   const players = new Map(); // "${region}:${name}" → player obj
