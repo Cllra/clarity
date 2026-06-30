@@ -370,6 +370,14 @@
     .add-result-btn:hover { border-color: var(--gold); color: var(--gold); }
     .add-result-btn:disabled { opacity: 0.4; cursor: default; }
 
+    .add-hint {
+      margin-top: 12px;
+      font-size: 12px;
+      color: var(--text-dim);
+      letter-spacing: 0.5px;
+      line-height: 1.6;
+    }
+
     .add-message {
       margin-top: 10px;
       font-size: 13px;
@@ -596,6 +604,10 @@
             <button className="add-btn" onClick={handleSearch} disabled={searching || !name.trim()}>
               {searching ? 'Searching...' : 'Search'}
             </button>
+          </div>
+
+          <div className="add-hint">
+            Search by family name and select a region, then click + Add. The player will appear in the leaderboard after the next daily scrape (3 AM UTC). EU · NA · SA only — KR/JP/TW/ASIA/TR players are added automatically.
           </div>
 
           {results && results.length > 0 && (
