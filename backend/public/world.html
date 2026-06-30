@@ -621,7 +621,7 @@
             body: JSON.stringify({ familyName: name.trim(), region }),
           });
           const data = await res.json();
-          if (data.added) setMessage({ type: 'ok', text: `✓ ${name} (${region}) added to queue — data will appear after the next scrape.` });
+          if (data.added) setMessage({ type: 'ok', text: `✓ ${name} (${region}) added to queue — data will appear after the next scrape. Note: if the profile is private or not found, no data will be shown.` });
           else setMessage({ type: 'ok', text: `${name} (${region}) is already in the pool.` });
           setCanAddByName(false);
           setName('');
