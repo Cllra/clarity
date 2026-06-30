@@ -4,7 +4,7 @@ const SERVER_URL  = process.env.CLARITY_SERVER_URL || 'https://clarity-guild.liv
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
 const BASE         = 'https://www.timestorm.de/';
-const ASIAN_REGIONS = new Set(['KR', 'JP', 'TW', 'AS', 'TR']);
+const ASIAN_REGIONS = new Set(['KR', 'JP', 'TW', 'AS']);
 const REGION_MAP   = { AS: 'ASIA' };
 
 const SKILL_PAGES = [
