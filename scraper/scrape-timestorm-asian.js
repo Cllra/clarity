@@ -11,8 +11,10 @@ const ASIAN_REGIONS = process.env.ALL_REGIONS === '1'
 const REGION_MAP   = { AS: 'ASIA' };
 
 const SKILL_PAGES = [
-  { url: '?mode=lifefame',       field: 'life_fame',       numeric: true  },
-  { url: '?mode=lifegathering',  field: 'spec_gathering',  numeric: false },
+  { url: '?mode=lifefame',       field: 'life_fame',           numeric: true  },
+  { url: '?mode=cp',             field: 'contribution_points', numeric: true  },
+  { url: '?mode=energy',         field: 'energy',              numeric: true  },
+  { url: '?mode=lifegathering',  field: 'spec_gathering',      numeric: false },
   { url: '?mode=lifefishing',    field: 'spec_fishing',    numeric: false },
   { url: '?mode=lifehunting',    field: 'spec_hunting',    numeric: false },
   { url: '?mode=lifecooking',    field: 'spec_cooking',    numeric: false },

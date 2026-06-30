@@ -312,6 +312,9 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
     const deleteTsSnap = db.prepare(
       `DELETE FROM global_snapshots WHERE date = ? AND profile_target = ?`
     );
+    const deactivateTsPlayer = db.prepare(
+      `UPDATE tracked_players SET active = 0 WHERE profile_target = ? AND profile_target LIKE 'ts:%'`
+    );
 
     db.transaction(() => {
       for (const snap of snapshots) {
@@ -329,8 +332,9 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
 
         insertSnap.run({ date, ...snap });
         updatePlayer.run({ date, family_name: snap.family_name, changed: changed ? 1 : 0, tier, profile_target: snap.profile_target });
-        // Timestorm-Platzhalter für diesen Spieler entfernen, falls vorhanden
-        deleteTsSnap.run(date, `ts:${snap.region}:${snap.family_name}`);
+        const tsKey = `ts:${snap.region}:${snap.family_name}`;
+        deleteTsSnap.run(date, tsKey);
+        deactivateTsPlayer.run(tsKey);
       }
 
       for (const pt of failed) {
