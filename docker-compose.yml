@@ -3,6 +3,18 @@ services:
     image: man90/bdo-rest-api:latest
     container_name: bdo-api
     restart: always
+    command: ["-redis", "redis://redis:6379/0"]
+    depends_on:
+      - redis
+    networks:
+      - clarity-internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: clarity-redis
+    restart: always
+    volumes:
+      - ./redis-data:/data
     networks:
       - clarity-internal
 
@@ -20,8 +32,8 @@ services:
       - BDO_API_URL=http://bdo-api:8001
       - GUILD_NAME=clarity
       - REGION=EU
-      - ADMIN_TOKEN=${ADMIN_TOKEN}
-
+      - ADMIN_TOKEN=54f68e6e0a6adada4a5d74e53be9a66cfa9b49e5eccf608e52275dd8a5715ed5
+      - DISCORD_WEBHOOK=https://discord.com/api/webhooks/1507321177121624084/0AyDVHQ9ak-GBBbwK-RBVg0yMzpr6T-ITSgb30sADafIE9m0KqK5x5PCt1TXarCHja_4
     depends_on:
       - bdo-api
     networks:

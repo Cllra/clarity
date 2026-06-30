@@ -25,6 +25,27 @@ async function fetchWithRetry(url, params, retries = 10, delay = 8000) {
   throw new Error(`Kein Ergebnis nach ${retries} Versuchen`);
 }
 
+async function resolveProfileTarget(familyName, region) {
+  const searchData = await fetchWithRetry(`${BDO_API}/v1/adventurer/search`, {
+    name: familyName, region
+  });
+
+  const results = Array.isArray(searchData)
+    ? searchData
+    : (searchData?.results || searchData?.searchResults || []);
+
+  if (!results.length) throw new Error('Keine Suchergebnisse');
+
+  const exact = results.find(r =>
+    (r.familyName || r.name || '').toLowerCase() === familyName.toLowerCase()
+  );
+  const match = exact || results[0];
+
+  const pt = match?.profileTarget || match?.profile_target;
+  if (!pt) throw new Error('Kein profileTarget in Suchergebnis');
+  return pt;
+}
+
 async function main() {
   if (!ADMIN_TOKEN) throw new Error('ADMIN_TOKEN nicht gesetzt');
 
@@ -45,18 +66,41 @@ async function main() {
   }
 
   const snapshots = [];
-  const failed    = [];
+  const failed    = [];  // profile_targets für Inaktiv-Markierung
 
   for (const player of players) {
+    let profileTarget = player.profile_target;
+
+    // Schritt 1: Namensauflösung falls noch kein profileTarget
+    if (!profileTarget) {
+      if (!player.family_name) {
+        console.error(`✗ Kein Name und kein profileTarget für Eintrag – überspringe`);
+        continue;
+      }
+      try {
+        profileTarget = await resolveProfileTarget(player.family_name, player.region);
+        console.log(`  → [${player.region}] ${player.family_name} aufgelöst`);
+        await axios.post(
+          `${SERVER_URL}/api/global/admin/resolve`,
+          { familyName: player.family_name, region: player.region, profileTarget },
+          { headers: { 'x-admin-token': ADMIN_TOKEN }, timeout: 10000 }
+        );
+        await sleep(3000);
+      } catch (e) {
+        console.error(`✗ [${player.region}] ${player.family_name} (resolve): ${e.message}`);
+        continue;
+      }
+    }
+
+    // Schritt 2: Profil abrufen
     try {
       const profile = await fetchWithRetry(`${BDO_API}/v1/adventurer`, {
-        profileTarget: player.profile_target,
-        region: player.region
+        profileTarget, region: player.region
       });
 
       const spec = profile.specLevels || {};
       const snap = {
-        profile_target:       player.profile_target,
+        profile_target:       profileTarget,
         family_name:          profile.familyName || player.family_name || '',
         region:               player.region,
         life_fame:            profile.lifeFame || 0,
@@ -69,8 +113,8 @@ async function main() {
       console.log(`✓ [${player.region}] ${snap.family_name}`);
       await sleep(5000);
     } catch (e) {
-      console.error(`✗ [${player.region}] ${player.profile_target}: ${e.message}`);
-      failed.push(player.profile_target);
+      console.error(`✗ [${player.region}] ${profileTarget}: ${e.message}`);
+      failed.push(profileTarget);
     }
   }
 

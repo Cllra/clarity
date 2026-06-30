@@ -35,12 +35,23 @@ const REGION_EMOJI = {
 
 module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
 
+  // ── Schema-Migration: alte tracked_players (profile_target PRIMARY KEY) ersetzen
+  {
+    const cols = db.prepare("PRAGMA table_info(tracked_players)").all();
+    const isOldSchema = cols.length > 0 && !cols.find(c => c.name === 'id');
+    if (isOldSchema) {
+      console.log('[global] Migriere tracked_players zu namensbasiertem Schema (alte Einträge gelöscht)');
+      db.exec('DROP TABLE tracked_players');
+    }
+  }
+
   // ── Tabellen anlegen ──────────────────────────────────────────────────────────
   db.exec(`
     CREATE TABLE IF NOT EXISTS tracked_players (
-      profile_target TEXT PRIMARY KEY,
-      region         TEXT,
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile_target TEXT UNIQUE,
       family_name    TEXT,
+      region         TEXT,
       last_scraped   TEXT,
       last_change    TEXT,
       scrape_tier    TEXT DEFAULT 'daily',
@@ -186,18 +197,62 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
 
   // ── POST /player/add ──────────────────────────────────────────────────────────
   router.post('/player/add', (req, res) => {
-    const { profileTarget, region = 'EU', source = 'search' } = req.body;
-    if (!profileTarget) return res.status(400).json({ error: 'profileTarget required' });
+    const { profileTarget, familyName, region = 'EU', source = 'search' } = req.body;
+    const today = new Date().toISOString().split('T')[0];
 
-    const existing = db.prepare('SELECT profile_target FROM tracked_players WHERE profile_target = ?').get(profileTarget);
-    if (existing) return res.json({ added: false, message: 'Bereits im Pool' });
+    if (profileTarget) {
+      const existing = db.prepare('SELECT id FROM tracked_players WHERE profile_target = ?').get(profileTarget);
+      if (existing) return res.json({ added: false, message: 'Bereits im Pool (profileTarget)' });
+      db.prepare(`
+        INSERT INTO tracked_players (profile_target, family_name, region, added_on, source, active)
+        VALUES (?, ?, ?, ?, ?, 1)
+      `).run(profileTarget, familyName || null, region, today, source);
+      return res.json({ added: true });
+    }
 
-    db.prepare(`
-      INSERT INTO tracked_players (profile_target, region, added_on, source, active)
-      VALUES (?, ?, ?, ?, 1)
-    `).run(profileTarget, region, new Date().toISOString().split('T')[0], source);
+    if (familyName) {
+      const existing = db.prepare('SELECT id FROM tracked_players WHERE family_name = ? AND region = ?').get(familyName, region);
+      if (existing) return res.json({ added: false, message: 'Bereits im Pool (familyName+region)' });
+      db.prepare(`
+        INSERT INTO tracked_players (family_name, region, added_on, source, active)
+        VALUES (?, ?, ?, ?, 1)
+      `).run(familyName, region, today, source);
+      return res.json({ added: true });
+    }
 
-    res.json({ added: true });
+    return res.status(400).json({ error: 'profileTarget oder familyName erforderlich' });
+  });
+
+  // ── POST /admin/resolve (Scraper → trägt aufgelösten profileTarget ein) ───────
+  router.post('/admin/resolve', (req, res) => {
+    const token = req.headers['x-admin-token'];
+    if (!token || token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { familyName, region, profileTarget } = req.body;
+    if (!familyName || !region || !profileTarget) {
+      return res.status(400).json({ error: 'familyName, region, profileTarget erforderlich' });
+    }
+
+    // Falls profileTarget bereits in anderem Eintrag (z.B. aus Clarity-Pool): Duplikat bereinigen
+    const ptRow = db.prepare('SELECT id FROM tracked_players WHERE profile_target = ?').get(profileTarget);
+    if (ptRow) {
+      db.prepare('DELETE FROM tracked_players WHERE family_name = ? AND region = ? AND profile_target IS NULL').run(familyName, region);
+      db.prepare('UPDATE tracked_players SET family_name = ? WHERE profile_target = ? AND family_name IS NULL').run(familyName, profileTarget);
+      return res.json({ resolved: true, merged: true });
+    }
+
+    const result = db.prepare(
+      'UPDATE tracked_players SET profile_target = ? WHERE family_name = ? AND region = ? AND profile_target IS NULL'
+    ).run(profileTarget, familyName, region);
+
+    if (result.changes === 0) {
+      db.prepare(`
+        INSERT OR IGNORE INTO tracked_players (profile_target, family_name, region, added_on, source, active)
+        VALUES (?, ?, ?, ?, 'resolved', 1)
+      `).run(profileTarget, familyName, region, new Date().toISOString().split('T')[0]);
+    }
+
+    res.json({ resolved: true, merged: false });
   });
 
   // ── GET /admin/pending (für Scraper) ─────────────────────────────────────────
