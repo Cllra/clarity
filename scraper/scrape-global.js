@@ -26,24 +26,37 @@ async function fetchWithRetry(url, params, retries = 10, delay = 8000) {
 }
 
 async function resolveProfileTarget(familyName, region) {
-  const searchData = await fetchWithRetry(`${BDO_API}/v1/adventurer/search`, {
-    query: familyName, region
-  });
+  const MAX_RETRIES = 3;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const searchData = await fetchWithRetry(`${BDO_API}/v1/adventurer/search`, {
+        query: familyName, region
+      });
 
-  const results = Array.isArray(searchData)
-    ? searchData
-    : (searchData?.results || searchData?.searchResults || []);
+      const results = Array.isArray(searchData)
+        ? searchData
+        : (searchData?.results || searchData?.searchResults || []);
 
-  if (!results.length) throw new Error('Keine Suchergebnisse');
+      if (!results.length) throw new Error('Keine Suchergebnisse');
 
-  const exact = results.find(r =>
-    (r.familyName || r.name || '').toLowerCase() === familyName.toLowerCase()
-  );
-  const match = exact || results[0];
+      const exact = results.find(r =>
+        (r.familyName || r.name || '').toLowerCase() === familyName.toLowerCase()
+      );
+      const match = exact || results[0];
 
-  const pt = match?.profileTarget || match?.profile_target;
-  if (!pt) throw new Error('Kein profileTarget in Suchergebnis');
-  return pt;
+      const pt = match?.profileTarget || match?.profile_target;
+      if (!pt) throw new Error('Kein profileTarget in Suchergebnis');
+      return pt;
+    } catch (e) {
+      if (e.response?.status === 429 && attempt < MAX_RETRIES) {
+        const wait = 30000 * (attempt + 1);
+        console.log(`  429 Rate-Limit, warte ${wait / 1000}s...`);
+        await sleep(wait);
+      } else {
+        throw e;
+      }
+    }
+  }
 }
 
 async function main() {
@@ -130,13 +143,32 @@ async function main() {
     throw new Error('Keine Daten gesammelt — alle Spieler fehlgeschlagen');
   }
 
-  console.log(`\nSende ${snapshots.length}/${players.length} Snapshots...`);
-  const res = await axios.post(
-    `${SERVER_URL}/api/global/admin/bulk-snapshot`,
-    { date, snapshots, failed, unresolvable },
-    { headers: { 'x-admin-token': ADMIN_TOKEN }, timeout: 60000 }
-  );
-  console.log(`✅ ${res.data.saved} gespeichert, ${res.data.failed} fehlgeschlagen, ${res.data.deactivated} deaktiviert für ${date}`);
+  console.log(`\nSende ${snapshots.length}/${players.length} Snapshots in Batches...`);
+  const BATCH = 50;
+  let totalSaved = 0;
+  let totalFailed = 0;
+  let totalDeactivated = 0;
+
+  for (let i = 0; i < snapshots.length; i += BATCH) {
+    const batch = snapshots.slice(i, i + BATCH);
+    const isLast = i + BATCH >= snapshots.length;
+    const res = await axios.post(
+      `${SERVER_URL}/api/global/admin/bulk-snapshot`,
+      {
+        date,
+        snapshots: batch,
+        failed:       isLast ? failed       : [],
+        unresolvable: isLast ? unresolvable : [],
+      },
+      { headers: { 'x-admin-token': ADMIN_TOKEN }, timeout: 60000 }
+    );
+    totalSaved       += res.data.saved      || 0;
+    totalFailed      += res.data.failed     || 0;
+    totalDeactivated += res.data.deactivated || 0;
+    console.log(`  Batch ${Math.floor(i / BATCH) + 1}: ${res.data.saved} gespeichert`);
+  }
+
+  console.log(`✅ ${totalSaved} gespeichert, ${totalFailed} fehlgeschlagen, ${totalDeactivated} deaktiviert für ${date}`);
 
   if (failed.length > 0) {
     console.log(`Fehlgeschlagen: ${failed.join(', ')}`);
