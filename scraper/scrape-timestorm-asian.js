@@ -90,15 +90,22 @@ async function main() {
   }
 
   const playerList = Array.from(players.values());
-  console.log(`\nSende ${playerList.length} Spieler an Server...`);
+  console.log(`\nSende ${playerList.length} Spieler in Batches...`);
 
-  const res = await axios.post(
-    `${SERVER_URL}/api/global/admin/timestorm-snapshot`,
-    { date, players: playerList },
-    { headers: { 'x-admin-token': ADMIN_TOKEN }, timeout: 30000 }
-  );
+  const BATCH = 50;
+  let totalSaved = 0;
+  for (let i = 0; i < playerList.length; i += BATCH) {
+    const batch = playerList.slice(i, i + BATCH);
+    const res = await axios.post(
+      `${SERVER_URL}/api/global/admin/timestorm-snapshot`,
+      { date, players: batch },
+      { headers: { 'x-admin-token': ADMIN_TOKEN }, timeout: 30000 }
+    );
+    totalSaved += res.data.saved;
+    process.stdout.write(`  ${i + batch.length}/${playerList.length} (${res.data.saved} neu, ${res.data.skipped} übersprungen)\n`);
+  }
 
-  console.log(`✅ ${res.data.saved} asiatische Spieler gespeichert für ${date}`);
+  console.log(`✅ ${totalSaved} Spieler gespeichert für ${date}`);
 }
 
 main().catch(e => {
