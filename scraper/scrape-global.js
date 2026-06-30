@@ -27,7 +27,7 @@ async function fetchWithRetry(url, params, retries = 10, delay = 8000) {
 
 async function resolveProfileTarget(familyName, region) {
   const searchData = await fetchWithRetry(`${BDO_API}/v1/adventurer/search`, {
-    name: familyName, region
+    query: familyName, region
   });
 
   const results = Array.isArray(searchData)

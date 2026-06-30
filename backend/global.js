@@ -187,7 +187,7 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
     if (!name) return res.status(400).json({ error: 'name required' });
     try {
       const r = await axios.get(`${BDO_API}/v1/adventurer/search`, {
-        params: { name, region }, timeout: 15000
+        params: { query: name, region }, timeout: 15000
       });
       res.json(r.data);
     } catch (e) {
