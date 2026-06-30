@@ -387,6 +387,7 @@
     .add-message.ok   { color: var(--green); }
     .add-message.err  { color: var(--red); }
     .add-message.warn { color: var(--gold); }
+    .add-message.info { color: var(--text-dim); }
 
     /* ── State ── */
     .state-center { text-align: center; padding: 80px 24px; color: var(--text-dim); }
@@ -541,79 +542,15 @@
     }
 
     function AddPlayer() {
-      const [name, setName]               = useState('');
-      const [region, setRegion]           = useState('EU');
-      const [searching, setSearching]     = useState(false);
-      const [results, setResults]         = useState(null);
-      const [message, setMessage]         = useState(null);
-      const [canAddByName, setCanAddByName] = useState(false);
+      const [name, setName]       = useState('');
+      const [region, setRegion]   = useState('EU');
+      const [loading, setLoading] = useState(false);
+      const [message, setMessage] = useState(null);
 
-      async function handleSearch() {
+      async function handleAdd() {
         if (!name.trim()) return;
-        setSearching(true);
-        setResults(null);
+        setLoading(true);
         setMessage(null);
-        setCanAddByName(false);
-
-        // 1. Check local pool first (no bdo-api needed)
-        try {
-          const chk = await fetch(`/api/global/player/check?name=${encodeURIComponent(name.trim())}&region=${region}`);
-          const chkData = await chk.json();
-          if (chkData.status === 'has_data') {
-            setMessage({ type: 'ok', text: `✓ ${name} (${region}) is already in the leaderboard.` });
-            setSearching(false);
-            return;
-          }
-          if (chkData.status === 'queued') {
-            setMessage({ type: 'ok', text: `${name} (${region}) is already queued — data will appear after the next scrape (3 AM UTC).` });
-            setSearching(false);
-            return;
-          }
-        } catch (e) {}
-
-        // 2. Try bdo-api search
-        try {
-          const res = await fetch(`/api/global/player/search?name=${encodeURIComponent(name.trim())}&region=${region}`);
-          const data = await res.json();
-          if (res.status === 503 || res.status === 502 || data.error === 'bdo_unavailable') {
-            setMessage({ type: 'warn', text: `BDO API is currently unavailable from the server. You can still add "${name}" to the queue by name — the profile will be resolved at the next scrape.` });
-            setCanAddByName(true);
-          } else if (!res.ok) {
-            setMessage({ type: 'err', text: `Search error: ${data.error}` });
-          } else {
-            const list = Array.isArray(data) ? data : (data.list || []);
-            if (list.length === 0) {
-              setMessage({ type: 'err', text: `No player found with name "${name}" in ${region}.` });
-            } else {
-              setResults(list);
-            }
-          }
-        } catch (e) {
-          setMessage({ type: 'err', text: 'Connection error.' });
-        }
-        setSearching(false);
-      }
-
-      async function handleAdd(profileTarget, r) {
-        setMessage(null);
-        try {
-          const res = await fetch('/api/global/player/add', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ profileTarget, region: r }),
-          });
-          const data = await res.json();
-          if (data.added) setMessage({ type: 'ok', text: `✓ ${name} added to pool — will appear after the next scrape.` });
-          else setMessage({ type: 'ok', text: `${name} is already in the pool.` });
-          setResults(null);
-          setCanAddByName(false);
-          setName('');
-        } catch (e) {
-          setMessage({ type: 'err', text: 'Error adding player.' });
-        }
-      }
-
-      async function handleAddByName() {
         try {
           const res = await fetch('/api/global/player/add', {
             method: 'POST',
@@ -621,13 +558,18 @@
             body: JSON.stringify({ familyName: name.trim(), region }),
           });
           const data = await res.json();
-          if (data.added) setMessage({ type: 'ok', text: `✓ ${name} (${region}) added to queue — data will appear after the next scrape. Note: if the profile is private or not found, no data will be shown.` });
-          else setMessage({ type: 'ok', text: `${name} (${region}) is already in the pool.` });
-          setCanAddByName(false);
-          setName('');
+          if (data.added) {
+            setMessage({ type: 'ok', text: `✓ ${name.trim()} (${region}) added to queue — data will appear after the next scrape (3 AM UTC). Note: private or non-existent profiles will show no data.` });
+            setName('');
+          } else if (data.status === 'has_data') {
+            setMessage({ type: 'info', text: `${name.trim()} (${region}) is already in the leaderboard.` });
+          } else {
+            setMessage({ type: 'info', text: `${name.trim()} (${region}) is already queued — data will appear after the next scrape.` });
+          }
         } catch (e) {
           setMessage({ type: 'err', text: 'Error adding player.' });
         }
+        setLoading(false);
       }
 
       return (
@@ -638,45 +580,22 @@
               className="add-input"
               placeholder="Family name..."
               value={name}
-              onChange={e => { setName(e.target.value); setMessage(null); setResults(null); setCanAddByName(false); }}
-              onKeyDown={e => e.key === 'Enter' && handleSearch()}
+              onChange={e => { setName(e.target.value); setMessage(null); }}
+              onKeyDown={e => e.key === 'Enter' && handleAdd()}
             />
             <select className="add-select" value={region} onChange={e => setRegion(e.target.value)}>
               {['EU','NA','SA','KR','JP','RU','TR','TW','ASIA'].map(r => (
                 <option key={r} value={r}>{r}</option>
               ))}
             </select>
-            <button className="add-btn" onClick={handleSearch} disabled={searching || !name.trim()}>
-              {searching ? 'Searching...' : 'Search'}
+            <button className="add-btn" onClick={handleAdd} disabled={loading || !name.trim()}>
+              {loading ? 'Adding...' : 'Add'}
             </button>
           </div>
 
           <div className="add-hint">
-            Enter an exact family name and region. EU · NA · SA only — KR/JP/TW/ASIA/TR players are tracked automatically via timestorm.de.
+            Enter an exact family name and select a region. Data will appear after the next daily scrape (3 AM UTC). KR/JP/TW/ASIA/TR players are tracked automatically.
           </div>
-
-          {results && results.length > 0 && (
-            <div className="add-results">
-              {results.map(r => (
-                <div key={r.profileTarget || r.profile_target} className="search-result">
-                  <span className="search-result-name">{r.familyName || r.name || r.profileTarget}</span>
-                  <span className="search-result-region">{r.region || region}</span>
-                  <button
-                    className="add-result-btn"
-                    onClick={() => handleAdd(r.profileTarget || r.profile_target, r.region || region)}
-                  >
-                    + Add
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {canAddByName && (
-            <button className="add-btn" style={{marginTop:10}} onClick={handleAddByName}>
-              + Add "{name}" to queue anyway
-            </button>
-          )}
 
           {message && (
             <div className={`add-message ${message.type}`}>{message.text}</div>

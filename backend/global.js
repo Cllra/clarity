@@ -236,8 +236,14 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
     }
 
     if (familyName) {
-      const existing = db.prepare('SELECT id FROM tracked_players WHERE family_name = ? AND region = ?').get(familyName, region);
-      if (existing) return res.json({ added: false, message: 'Bereits im Pool (familyName+region)' });
+      const existing = db.prepare('SELECT profile_target FROM tracked_players WHERE family_name = ? AND region = ?').get(familyName, region);
+      if (existing) {
+        const latestDate = db.prepare('SELECT MAX(date) as d FROM global_snapshots').get()?.d;
+        const hasData = latestDate && db.prepare(
+          `SELECT 1 FROM global_snapshots WHERE date = ? AND (profile_target = ? OR (family_name = ? AND region = ?))`
+        ).get(latestDate, existing.profile_target || '', familyName, region);
+        return res.json({ added: false, status: hasData ? 'has_data' : 'queued' });
+      }
       db.prepare(`
         INSERT INTO tracked_players (family_name, region, added_on, source, active)
         VALUES (?, ?, ?, ?, 1)
