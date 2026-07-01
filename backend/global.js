@@ -294,7 +294,9 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
     const today   = new Date().toISOString().split('T')[0];
     const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
 
-    const players = db.prepare(`
+    const limit = parseInt(req.query.limit) || null;
+
+    const sql = `
       SELECT profile_target, region, family_name, scrape_tier
       FROM tracked_players
       WHERE active = 1
@@ -307,7 +309,12 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
       ORDER BY
         (profile_target IS NOT NULL) DESC,
         last_scraped ASC NULLS LAST
-    `).all(today, weekAgo);
+      ${limit ? 'LIMIT ?' : ''}
+    `;
+
+    const players = limit
+      ? db.prepare(sql).all(today, weekAgo, limit)
+      : db.prepare(sql).all(today, weekAgo);
 
     res.json({ date: today, players });
   });

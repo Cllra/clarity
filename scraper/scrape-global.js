@@ -1,9 +1,12 @@
 const axios = require('axios');
 
-const BDO_API     = process.env.BDO_API_URL        || 'http://localhost:8001';
-const SERVER_URL  = process.env.CLARITY_SERVER_URL  || 'https://clarity-guild.live';
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
-const TARGET_DATE = process.env.TARGET_DATE         || null;
+const BDO_API      = process.env.BDO_API_URL        || 'http://localhost:8001';
+const SERVER_URL   = process.env.CLARITY_SERVER_URL  || 'https://clarity-guild.live';
+const ADMIN_TOKEN  = process.env.ADMIN_TOKEN;
+const TARGET_DATE  = process.env.TARGET_DATE         || null;
+const PLAYER_LIMIT = process.env.PLAYER_LIMIT && parseInt(process.env.PLAYER_LIMIT) > 0
+  ? parseInt(process.env.PLAYER_LIMIT)
+  : null;
 
 const LIFESKILLS = [
   'gathering','fishing','hunting','cooking','alchemy',
@@ -67,10 +70,14 @@ async function main() {
   console.log('Waiting 8s for bdo-api...');
   await sleep(8000);
 
+  const pendingUrl = PLAYER_LIMIT
+    ? `${SERVER_URL}/api/global/admin/pending?limit=${PLAYER_LIMIT}`
+    : `${SERVER_URL}/api/global/admin/pending`;
   const { data: { players } } = await axios.get(
-    `${SERVER_URL}/api/global/admin/pending`,
+    pendingUrl,
     { headers: { 'x-admin-token': ADMIN_TOKEN }, timeout: 30000 }
   );
+  if (PLAYER_LIMIT) console.log(`(limit: ${PLAYER_LIMIT} players per run)`);
   console.log(`${players.length} players pending`);
 
   if (players.length === 0) {
