@@ -22,7 +22,7 @@ async function fetchWithRetry(url, params, retries = 10, delay = 8000) {
     }
     return res.data;
   }
-  throw new Error(`Kein Ergebnis nach ${retries} Versuchen`);
+  throw new Error(`No result after ${retries} attempts`);
 }
 
 async function resolveProfileTarget(familyName, region) {
@@ -37,7 +37,7 @@ async function resolveProfileTarget(familyName, region) {
         ? searchData
         : (searchData?.results || searchData?.searchResults || []);
 
-      if (!results.length) throw new Error('Keine Suchergebnisse');
+      if (!results.length) throw new Error('No search results');
 
       const exact = results.find(r =>
         (r.familyName || r.name || '').toLowerCase() === familyName.toLowerCase()
@@ -45,12 +45,12 @@ async function resolveProfileTarget(familyName, region) {
       const match = exact || results[0];
 
       const pt = match?.profileTarget || match?.profile_target;
-      if (!pt) throw new Error('Kein profileTarget in Suchergebnis');
+      if (!pt) throw new Error('No profileTarget in search result');
       return pt;
     } catch (e) {
       if (e.response?.status === 429 && attempt < MAX_RETRIES) {
         const wait = 30000 * (attempt + 1);
-        console.log(`  429 Rate-Limit, warte ${wait / 1000}s...`);
+        console.log(`  429 rate limit on search, waiting ${wait / 1000}s...`);
         await sleep(wait);
       } else {
         throw e;
@@ -60,40 +60,40 @@ async function resolveProfileTarget(familyName, region) {
 }
 
 async function main() {
-  if (!ADMIN_TOKEN) throw new Error('ADMIN_TOKEN nicht gesetzt');
+  if (!ADMIN_TOKEN) throw new Error('ADMIN_TOKEN not set');
 
   const date = TARGET_DATE || new Date(Date.now() - 86400000).toISOString().split('T')[0];
-  console.log(`Global Scrape für ${date}`);
-  console.log('Warte 8s auf bdo-api...');
+  console.log(`Global scrape for ${date}`);
+  console.log('Waiting 8s for bdo-api...');
   await sleep(8000);
 
   const { data: { players } } = await axios.get(
     `${SERVER_URL}/api/global/admin/pending`,
     { headers: { 'x-admin-token': ADMIN_TOKEN }, timeout: 30000 }
   );
-  console.log(`${players.length} Spieler ausstehend`);
+  console.log(`${players.length} players pending`);
 
   if (players.length === 0) {
-    console.log('Pool leer oder alle heute bereits gescrapt.');
+    console.log('Pool empty or all players already scraped today.');
     return;
   }
 
   const snapshots    = [];
-  const failed       = [];  // profile_targets: transient failures (retry later)
+  const failed       = [];  // profile_targets: transient failures (retried next run)
   const unresolvable = [];  // {familyName, region}: permanent 400 from search → deactivate
 
   for (const player of players) {
     let profileTarget = player.profile_target;
 
-    // Schritt 1: Namensauflösung falls noch kein profileTarget
+    // Step 1: Resolve profileTarget if not yet known
     if (!profileTarget) {
       if (!player.family_name) {
-        console.error(`✗ Kein Name und kein profileTarget für Eintrag – überspringe`);
+        console.error(`✗ No name and no profileTarget for entry — skipping`);
         continue;
       }
       try {
         profileTarget = await resolveProfileTarget(player.family_name, player.region);
-        console.log(`  → [${player.region}] ${player.family_name} aufgelöst`);
+        console.log(`  → [${player.region}] ${player.family_name} resolved`);
         await axios.post(
           `${SERVER_URL}/api/global/admin/resolve`,
           { familyName: player.family_name, region: player.region, profileTarget },
@@ -102,48 +102,59 @@ async function main() {
         await sleep(3000);
       } catch (e) {
         if (e.response?.status === 400) {
-          // Permanenter Fehler: Search-Endpoint unterstützt diese Region/Zeichen nicht
-          console.error(`✗ [${player.region}] ${player.family_name} (resolve, dauerhaft): ${e.message}`);
+          // Permanent: search endpoint doesn't support this region/character set
+          console.error(`✗ [${player.region}] ${player.family_name} (resolve, permanent): ${e.message}`);
           unresolvable.push({ familyName: player.family_name, region: player.region });
         } else {
-          // Transient (Timeout, Netzwerk etc.)
+          // Transient (timeout, network, etc.)
           console.error(`✗ [${player.region}] ${player.family_name} (resolve): ${e.message}`);
         }
         continue;
       }
     }
 
-    // Schritt 2: Profil abrufen
-    try {
-      const profile = await fetchWithRetry(`${BDO_API}/v1/adventurer`, {
-        profileTarget, region: player.region
-      });
+    // Step 2: Fetch profile (with 429 backoff)
+    const MAX_PROFILE_RETRIES = 3;
+    for (let attempt = 0; attempt <= MAX_PROFILE_RETRIES; attempt++) {
+      try {
+        const profile = await fetchWithRetry(`${BDO_API}/v1/adventurer`, {
+          profileTarget, region: player.region
+        });
 
-      const spec = profile.specLevels || {};
-      const snap = {
-        profile_target:       profileTarget,
-        family_name:          profile.familyName || player.family_name || '',
-        region:               player.region,
-        life_fame:            profile.lifeFame || 0,
-        contribution_points:  profile.contributionPoints || 0,
-        energy:               profile.energy || 0,
-      };
-      for (const s of LIFESKILLS) snap[`spec_${s}`] = spec[s] || '';
+        const spec = profile.specLevels || {};
+        const snap = {
+          profile_target:       profileTarget,
+          family_name:          profile.familyName || player.family_name || '',
+          region:               player.region,
+          life_fame:            profile.lifeFame || 0,
+          contribution_points:  profile.contributionPoints || 0,
+          energy:               profile.energy || 0,
+        };
+        for (const s of LIFESKILLS) snap[`spec_${s}`] = spec[s] || '';
 
-      snapshots.push(snap);
-      console.log(`✓ [${player.region}] ${snap.family_name}`);
-      await sleep(5000);
-    } catch (e) {
-      console.error(`✗ [${player.region}] ${profileTarget}: ${e.message}`);
-      failed.push(profileTarget);
+        snapshots.push(snap);
+        console.log(`✓ [${player.region}] ${snap.family_name}`);
+        await sleep(5000);
+        break;
+      } catch (e) {
+        if (e.response?.status === 429 && attempt < MAX_PROFILE_RETRIES) {
+          const wait = 60000 * (attempt + 1);
+          console.log(`  429 on profile fetch, waiting ${wait / 1000}s...`);
+          await sleep(wait);
+        } else {
+          console.error(`✗ [${player.region}] ${profileTarget}: ${e.message}`);
+          failed.push(profileTarget);
+          break;
+        }
+      }
     }
   }
 
   if (snapshots.length === 0) {
-    throw new Error('Keine Daten gesammelt — alle Spieler fehlgeschlagen');
+    throw new Error('No data collected — all players failed');
   }
 
-  console.log(`\nSende ${snapshots.length}/${players.length} Snapshots in Batches...`);
+  console.log(`\nSending ${snapshots.length}/${players.length} snapshots in batches...`);
   const BATCH = 50;
   let totalSaved = 0;
   let totalFailed = 0;
@@ -162,21 +173,20 @@ async function main() {
       },
       { headers: { 'x-admin-token': ADMIN_TOKEN }, timeout: 60000 }
     );
-    totalSaved       += res.data.saved      || 0;
-    totalFailed      += res.data.failed     || 0;
+    totalSaved       += res.data.saved       || 0;
+    totalFailed      += res.data.failed      || 0;
     totalDeactivated += res.data.deactivated || 0;
-    console.log(`  Batch ${Math.floor(i / BATCH) + 1}: ${res.data.saved} gespeichert`);
+    console.log(`  Batch ${Math.floor(i / BATCH) + 1}: ${res.data.saved} saved`);
   }
 
-  console.log(`✅ ${totalSaved} gespeichert, ${totalFailed} fehlgeschlagen, ${totalDeactivated} deaktiviert für ${date}`);
+  console.log(`✅ ${totalSaved} saved, ${totalFailed} failed, ${totalDeactivated} deactivated for ${date}`);
 
   if (failed.length > 0) {
-    console.log(`Fehlgeschlagen: ${failed.join(', ')}`);
-    process.exit(1);
+    console.log(`${failed.length} players failed — will be retried in the next run.`);
   }
 }
 
 main().catch(e => {
-  console.error('Kritischer Fehler:', e.message);
+  console.error('Critical error:', e.message);
   process.exit(1);
 });

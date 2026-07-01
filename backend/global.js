@@ -304,6 +304,9 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
         OR
         (scrape_tier = 'weekly' AND (last_scraped IS NULL OR last_scraped < ?))
       )
+      ORDER BY
+        (profile_target IS NOT NULL) DESC,
+        last_scraped ASC NULLS LAST
     `).all(today, weekAgo);
 
     res.json({ date: today, players });
