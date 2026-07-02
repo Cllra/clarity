@@ -1,16 +1,12 @@
-name: Global Scrape — Run 1
+name: Global Scrape — Run 2
 
 on:
   schedule:
-    - cron: '0 3 * * *'   # 3 AM UTC daily
+    - cron: '0 6 * * *'   # 6 AM UTC daily (picks up players missed by run 1)
   workflow_dispatch:
     inputs:
       date:
         description: 'Date (YYYY-MM-DD), empty = yesterday'
-        required: false
-        default: ''
-      player_limit:
-        description: 'Max players to scrape (empty = 350)'
         required: false
         default: ''
 
@@ -47,20 +43,11 @@ jobs:
         run: npm install
         working-directory: scraper
 
-      - name: Run global scraper (EU/NA/SA)
+      - name: Run global scraper — remaining players (EU/NA/SA)
         run: node scrape-global.js
         working-directory: scraper
         env:
           BDO_API_URL: http://localhost:8001
-          CLARITY_SERVER_URL: https://clarity-guild.live
-          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
-          TARGET_DATE: ${{ github.event.inputs.date }}
-          PLAYER_LIMIT: ${{ github.event.inputs.player_limit || '350' }}
-
-      - name: Scrape Asian players from timestorm.de
-        run: node scrape-timestorm-asian.js
-        working-directory: scraper
-        env:
           CLARITY_SERVER_URL: https://clarity-guild.live
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
           TARGET_DATE: ${{ github.event.inputs.date }}

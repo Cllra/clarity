@@ -308,6 +308,7 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
       )
       ORDER BY
         (profile_target IS NOT NULL) DESC,
+        (scrape_tier = 'daily') DESC,
         last_scraped ASC NULLS LAST
       ${limit ? 'LIMIT ?' : ''}
     `;
