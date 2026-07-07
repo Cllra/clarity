@@ -291,9 +291,7 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
     const token = req.headers['x-admin-token'];
     if (!token || token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
 
-    const today   = new Date().toISOString().split('T')[0];
-    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
-
+    const today = new Date().toISOString().split('T')[0];
     const limit = parseInt(req.query.limit) || null;
 
     const sql = `
@@ -301,21 +299,16 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
       FROM tracked_players
       WHERE active = 1
       AND (source IS NULL OR source != 'timestorm')
-      AND (
-        (scrape_tier = 'daily'  AND (last_scraped IS NULL OR last_scraped < ?))
-        OR
-        (scrape_tier = 'weekly' AND (last_scraped IS NULL OR last_scraped < ?))
-      )
+      AND (last_scraped IS NULL OR last_scraped < ?)
       ORDER BY
         (profile_target IS NOT NULL) DESC,
-        (scrape_tier = 'daily') DESC,
         last_scraped ASC NULLS LAST
       ${limit ? 'LIMIT ?' : ''}
     `;
 
     const players = limit
-      ? db.prepare(sql).all(today, weekAgo, limit)
-      : db.prepare(sql).all(today, weekAgo);
+      ? db.prepare(sql).all(today, limit)
+      : db.prepare(sql).all(today);
 
     res.json({ date: today, players });
   });
@@ -367,13 +360,8 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
 
         const changed = snapshotChanged(prev, snap);
 
-        const player = db.prepare('SELECT last_change FROM tracked_players WHERE profile_target = ?').get(snap.profile_target);
-        const lastChange = changed ? date : (player?.last_change || date);
-        const daysSince = (Date.now() - new Date(lastChange).getTime()) / 86400000;
-        const tier = daysSince >= 7 ? 'weekly' : 'daily';
-
         insertSnap.run({ date, ...snap });
-        updatePlayer.run({ date, family_name: snap.family_name, changed: changed ? 1 : 0, tier, profile_target: snap.profile_target });
+        updatePlayer.run({ date, family_name: snap.family_name, changed: changed ? 1 : 0, tier: 'daily', profile_target: snap.profile_target });
         const tsKey = `ts:${snap.region}:${snap.family_name}`;
         deleteTsSnap.run(date, tsKey);
         deactivateTsPlayer.run(tsKey);
