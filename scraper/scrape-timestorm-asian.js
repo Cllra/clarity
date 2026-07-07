@@ -4,27 +4,25 @@ const SERVER_URL  = process.env.CLARITY_SERVER_URL || 'https://clarity-guild.liv
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const TARGET_DATE = process.env.TARGET_DATE || null;
 
-const BASE         = 'https://www.timestorm.de/';
-const ASIAN_REGIONS = process.env.ALL_REGIONS === '1'
-  ? null  // null = alle Regionen
-  : new Set(['KR', 'JP', 'TW', 'AS', 'TR']);
-const REGION_MAP   = { AS: 'ASIA' };
+const BASE       = 'https://www.timestorm.de/';
+const REGION_MAP = { AS: 'ASIA' };
+const ASIAN_REGIONS = new Set(['KR', 'JP', 'TW', 'ASIA', 'TR']);
 
 const SKILL_PAGES = [
   { url: '?mode=lifefame',       field: 'life_fame',           numeric: true  },
   { url: '?mode=cp',             field: 'contribution_points', numeric: true  },
   { url: '?mode=energy',         field: 'energy',              numeric: true  },
   { url: '?mode=lifegathering',  field: 'spec_gathering',      numeric: false },
-  { url: '?mode=lifefishing',    field: 'spec_fishing',    numeric: false },
-  { url: '?mode=lifehunting',    field: 'spec_hunting',    numeric: false },
-  { url: '?mode=lifecooking',    field: 'spec_cooking',    numeric: false },
-  { url: '?mode=lifealchemy',    field: 'spec_alchemy',    numeric: false },
-  { url: '?mode=lifeprocessing', field: 'spec_processing', numeric: false },
-  { url: '?mode=lifetraining',   field: 'spec_training',   numeric: false },
-  { url: '?mode=lifetrade',      field: 'spec_trading',    numeric: false },
-  { url: '?mode=lifefarming',    field: 'spec_farming',    numeric: false },
-  { url: '?mode=lifesailing',    field: 'spec_sailing',    numeric: false },
-  { url: '?mode=lifebarter',     field: 'spec_barter',     numeric: false },
+  { url: '?mode=lifefishing',    field: 'spec_fishing',        numeric: false },
+  { url: '?mode=lifehunting',    field: 'spec_hunting',        numeric: false },
+  { url: '?mode=lifecooking',    field: 'spec_cooking',        numeric: false },
+  { url: '?mode=lifealchemy',    field: 'spec_alchemy',        numeric: false },
+  { url: '?mode=lifeprocessing', field: 'spec_processing',     numeric: false },
+  { url: '?mode=lifetraining',   field: 'spec_training',       numeric: false },
+  { url: '?mode=lifetrade',      field: 'spec_trading',        numeric: false },
+  { url: '?mode=lifefarming',    field: 'spec_farming',        numeric: false },
+  { url: '?mode=lifesailing',    field: 'spec_sailing',        numeric: false },
+  { url: '?mode=lifebarter',     field: 'spec_barter',         numeric: false },
 ];
 
 const EMPTY_SKILLS = {
@@ -38,14 +36,13 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function parseRows(html) {
   const results = [];
-  // Trifft auf:  <td>RANK</td><td><img title="JP"></td><td><a>Name</a></td><td>SCORE</td>
   const regex = /<td>\d+<\/td>\s*<td><img[^>]+title="([A-Z]{2,4})"[^>]*><\/td>\s*<td><a[^>]*>([^<]+)<\/a><\/td>\s*<td>([^<]*)<\/td>/gi;
   let m;
   while ((m = regex.exec(html)) !== null) {
     const rawRegion  = m[1].toUpperCase();
     const familyName = m[2].trim();
     const score      = m[3].trim();
-    if ((!ASIAN_REGIONS || ASIAN_REGIONS.has(rawRegion)) && familyName) {
+    if (familyName) {
       const region = REGION_MAP[rawRegion] || rawRegion;
       results.push({ familyName, region, score });
     }
@@ -54,15 +51,16 @@ function parseRows(html) {
 }
 
 async function main() {
-  if (!ADMIN_TOKEN) throw new Error('ADMIN_TOKEN nicht gesetzt');
+  if (!ADMIN_TOKEN) throw new Error('ADMIN_TOKEN not set');
 
   const date = TARGET_DATE || new Date(Date.now() - 86400000).toISOString().split('T')[0];
-  console.log(`Timestorm Asian Scrape für ${date}`);
+  console.log(`Timestorm scrape for ${date} (all regions)`);
 
-  const players = new Map(); // "${region}:${name}" → player obj
+  const asian   = new Map(); // Asian players — get full snapshot from timestorm
+  const western = new Map(); // EU/NA/SA — seed into tracked_players for bdo-api scrape
 
   for (const { url, field, numeric } of SKILL_PAGES) {
-    console.log(`Lade ${url}...`);
+    console.log(`Fetching ${url}...`);
     try {
       const res = await axios.get(BASE + url, {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; clarity-seed/1.0; +https://clarity-guild.live)' },
@@ -70,48 +68,68 @@ async function main() {
       });
 
       const rows = parseRows(res.data);
-      console.log(`  ${rows.length} asiatische Einträge`);
+      let asianCount = 0, westernCount = 0;
 
       for (const { familyName, region, score } of rows) {
         const key = `${region}:${familyName}`;
-        if (!players.has(key)) {
-          players.set(key, { familyName, region, life_fame: 0, contribution_points: 0, energy: 0, ...EMPTY_SKILLS });
+        if (ASIAN_REGIONS.has(region)) {
+          if (!asian.has(key)) {
+            asian.set(key, { familyName, region, life_fame: 0, contribution_points: 0, energy: 0, ...EMPTY_SKILLS });
+          }
+          asian.get(key)[field] = numeric ? (parseInt(score) || 0) : score;
+          asianCount++;
+        } else {
+          western.set(key, { familyName, region });
+          westernCount++;
         }
-        const p = players.get(key);
-        p[field] = numeric ? (parseInt(score) || 0) : score;
       }
-
+      console.log(`  ${asianCount} Asian, ${westernCount} Western`);
       await sleep(2000);
     } catch (e) {
-      console.error(`  Fehler bei ${url}: ${e.message}`);
+      console.error(`  Error on ${url}: ${e.message}`);
     }
   }
 
-  if (players.size === 0) {
-    console.log('Keine asiatischen Spieler gefunden.');
-    return;
+  // Asian players: full snapshot via timestorm-snapshot
+  if (asian.size > 0) {
+    const playerList = Array.from(asian.values());
+    console.log(`\nSending ${playerList.length} Asian players...`);
+    const BATCH = 50;
+    let totalSaved = 0;
+    for (let i = 0; i < playerList.length; i += BATCH) {
+      const batch = playerList.slice(i, i + BATCH);
+      const res = await axios.post(
+        `${SERVER_URL}/api/global/admin/timestorm-snapshot`,
+        { date, players: batch },
+        { headers: { 'x-admin-token': ADMIN_TOKEN }, timeout: 30000 }
+      );
+      totalSaved += res.data.saved;
+      console.log(`  ${i + batch.length}/${playerList.length} (${res.data.saved} saved, ${res.data.skipped} skipped)`);
+    }
+    console.log(`✅ ${totalSaved} Asian players saved for ${date}`);
   }
 
-  const playerList = Array.from(players.values());
-  console.log(`\nSende ${playerList.length} Spieler in Batches...`);
-
-  const BATCH = 50;
-  let totalSaved = 0;
-  for (let i = 0; i < playerList.length; i += BATCH) {
-    const batch = playerList.slice(i, i + BATCH);
-    const res = await axios.post(
-      `${SERVER_URL}/api/global/admin/timestorm-snapshot`,
-      { date, players: batch },
-      { headers: { 'x-admin-token': ADMIN_TOKEN }, timeout: 30000 }
-    );
-    totalSaved += res.data.saved;
-    process.stdout.write(`  ${i + batch.length}/${playerList.length} (${res.data.saved} neu, ${res.data.skipped} übersprungen)\n`);
+  // Western players (EU/NA/SA): seed into tracked_players — bdo-api scraper handles the rest
+  if (western.size > 0) {
+    const playerList = Array.from(western.values()).map(p => ({ familyName: p.familyName, region: p.region }));
+    console.log(`\nSeeding ${playerList.length} Western players into scrape queue...`);
+    const BATCH = 50;
+    let totalAdded = 0;
+    for (let i = 0; i < playerList.length; i += BATCH) {
+      const batch = playerList.slice(i, i + BATCH);
+      const res = await axios.post(
+        `${SERVER_URL}/api/global/admin/seed-players`,
+        { players: batch },
+        { headers: { 'x-admin-token': ADMIN_TOKEN }, timeout: 30000 }
+      );
+      totalAdded += res.data.added;
+      console.log(`  ${i + batch.length}/${playerList.length} (${res.data.added} new, ${res.data.skipped} already tracked)`);
+    }
+    console.log(`✅ ${totalAdded} new Western players added to scrape queue`);
   }
-
-  console.log(`✅ ${totalSaved} Spieler gespeichert für ${date}`);
 }
 
 main().catch(e => {
-  console.error('Kritischer Fehler:', e.message);
+  console.error('Critical error:', e.message);
   process.exit(1);
 });

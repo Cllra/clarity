@@ -447,5 +447,34 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
     res.json({ saved, skipped, date });
   });
 
+  // ── POST /admin/seed-players (add Western players discovered via timestorm) ───
+  router.post('/admin/seed-players', (req, res) => {
+    const token = req.headers['x-admin-token'];
+    if (!token || token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { players = [] } = req.body;
+
+    let added = 0;
+    const checkExisting = db.prepare(
+      'SELECT id FROM tracked_players WHERE family_name = ? AND region = ? AND active = 1'
+    );
+    const insert = db.prepare(`
+      INSERT INTO tracked_players (family_name, region, profile_target, added_on, source, active)
+      VALUES (?, ?, NULL, date('now'), 'timestorm-web', 1)
+    `);
+
+    db.transaction(() => {
+      for (const { familyName, region } of players) {
+        if (!checkExisting.get(familyName, region)) {
+          insert.run(familyName, region);
+          added++;
+        }
+      }
+    })();
+
+    console.log(`[${new Date().toISOString()}] seed-players: ${added} new players added from timestorm (${players.length} total)`);
+    res.json({ added, skipped: players.length - added, total: players.length });
+  });
+
   return router;
 };
