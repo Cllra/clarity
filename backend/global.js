@@ -332,9 +332,11 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
          ${LIFESKILLS.map(s => `@spec_${s}`).join(', ')})
     `);
 
+    const today = new Date().toISOString().split('T')[0];
+
     const updatePlayer = db.prepare(`
       UPDATE tracked_players
-      SET last_scraped = @date,
+      SET last_scraped = @today,
           family_name  = @family_name,
           last_change  = CASE WHEN @changed = 1 THEN @date ELSE last_change END,
           scrape_tier  = @tier
@@ -361,7 +363,7 @@ module.exports = function createGlobalRouter({ db, BDO_API, ADMIN_TOKEN }) {
         const changed = snapshotChanged(prev, snap);
 
         insertSnap.run({ date, ...snap });
-        updatePlayer.run({ date, family_name: snap.family_name, changed: changed ? 1 : 0, tier: 'daily', profile_target: snap.profile_target });
+        updatePlayer.run({ today, date, family_name: snap.family_name, changed: changed ? 1 : 0, tier: 'daily', profile_target: snap.profile_target });
         const tsKey = `ts:${snap.region}:${snap.family_name}`;
         deleteTsSnap.run(date, tsKey);
         deactivateTsPlayer.run(tsKey);
