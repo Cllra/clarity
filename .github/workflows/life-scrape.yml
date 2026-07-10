@@ -1,0 +1,34 @@
+name: Life Guild Scrape
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: 'Date to scrape (YYYY-MM-DD), default: yesterday'
+        required: false
+        default: ''
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: scraper
+        run: npm install
+
+      - name: Run Life guild scrape
+        working-directory: scraper
+        env:
+          CLARITY_SERVER_URL: ${{ secrets.CLARITY_SERVER_URL }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          GUILD_NAME: life
+          REGION: EU
+          TARGET_DATE: ${{ github.event.inputs.target_date }}
+          SECRET_SERVER_URL: ${{ secrets.CLARITY_SERVER_URL }}
+        run: node scrape-life.js
