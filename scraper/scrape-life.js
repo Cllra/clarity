@@ -95,7 +95,7 @@ async function main() {
 
   console.log(`\nSending ${snapshots.length}/${total} snapshots to secret service...`);
   const res = await axios.post(
-    `${SERVER_URL}/api/admin/life-snapshot`,
+    `${SERVER_URL}/secret/admin/life-snapshot`,
     { date: targetDate, snapshots },
     { headers: { 'x-admin-token': ADMIN_TOKEN }, timeout: 30000 }
   );
