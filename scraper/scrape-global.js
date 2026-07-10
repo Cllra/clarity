@@ -158,7 +158,15 @@ async function main() {
   }
 
   if (snapshots.length === 0) {
-    throw new Error('No data collected — all players failed');
+    console.log(`⚠️  0/${players.length} collected — all players failed (will retry tomorrow)`);
+    if (unresolvable.length > 0) {
+      await axios.post(
+        `${SERVER_URL}/api/global/admin/bulk-snapshot`,
+        { date, snapshots: [], failed, unresolvable },
+        { headers: { 'x-admin-token': ADMIN_TOKEN }, timeout: 30000 }
+      ).catch(e => console.error('  deactivate call failed:', e.message));
+    }
+    return;
   }
 
   console.log(`\nSending ${snapshots.length}/${players.length} snapshots in batches...`);
