@@ -66,7 +66,6 @@ db.exec(`
     username      TEXT,
     discriminator TEXT,
     authorized    INTEGER DEFAULT 1,
-    bypass_token  TEXT UNIQUE,
     note          TEXT,
     created_at    TEXT DEFAULT (datetime('now'))
   )
@@ -320,6 +319,7 @@ app.get('/auth/discord/callback', async (req, res) => {
 
     issueSession(res, discord_id, username);
     console.log(`[auth] ${username} (${discord_id}) logged in`);
+    sendDiscordAlert(`🔐 **${username}** logged into clarity-guild.live`).catch(() => {});
     res.redirect('/');
   } catch (e) {
     console.error('Discord OAuth error:', e.message);
@@ -336,16 +336,6 @@ app.get('/auth/me', (req, res) => {
   const session = verifySession(req.cookies?.cgauth);
   if (!session) return res.status(401).json({ error: 'Not logged in' });
   res.json({ username: session.username, discord_id: session.discord_id });
-});
-
-app.get('/auth/bypass/:token', (req, res) => {
-  const user = db.prepare(
-    'SELECT * FROM auth_users WHERE bypass_token = ? AND authorized = 1'
-  ).get(req.params.token);
-  if (!user) return res.redirect('/?error=invalid_token');
-
-  issueSession(res, `bypass_${req.params.token.slice(0, 8)}`, user.note || 'guest');
-  res.redirect('/');
 });
 
 // ── Admin routes (x-admin-token, before auth gate) ───────────────────────────
@@ -410,23 +400,12 @@ app.post('/api/admin/auth/authorize', (req, res) => {
   res.json({ ok: true, discord_id });
 });
 
-app.post('/api/admin/auth/bypass', (req, res) => {
-  const token = req.headers['x-admin-token'];
-  if (!token || token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
-
-  const { note = '' } = req.body;
-  const bypass_token = crypto.randomBytes(24).toString('hex');
-  db.prepare('INSERT INTO auth_users (bypass_token, authorized, note) VALUES (?, 1, ?)').run(bypass_token, note);
-
-  res.json({ bypass_url: `${BASE_URL}/auth/bypass/${bypass_token}`, note });
-});
-
 app.get('/api/admin/auth/users', (req, res) => {
   const token = req.headers['x-admin-token'];
   if (!token || token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
 
   const users = db.prepare(
-    'SELECT id, discord_id, username, authorized, note, created_at, (bypass_token IS NOT NULL) as has_bypass FROM auth_users'
+    'SELECT id, discord_id, username, authorized, note, created_at FROM auth_users'
   ).all();
   res.json(users);
 });

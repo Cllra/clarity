@@ -130,54 +130,6 @@
     line-height: 1.5;
   }
 
-  /* Bypass code section */
-  .bypass-toggle {
-    margin-top: 1.5rem;
-    font-size: 0.75rem;
-    color: var(--fg2);
-    cursor: pointer;
-    text-decoration: underline;
-    text-underline-offset: 3px;
-    background: none;
-    border: none;
-    font-family: inherit;
-  }
-  .bypass-toggle:hover { color: var(--fg); }
-
-  .bypass-form {
-    display: none;
-    margin-top: 1rem;
-    gap: 0.5rem;
-    flex-direction: row;
-  }
-  .bypass-form.open { display: flex; }
-
-  .bypass-input {
-    flex: 1;
-    padding: 0.55rem 0.8rem;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--fg);
-    font-family: inherit;
-    font-size: 0.8rem;
-    outline: none;
-  }
-  .bypass-input:focus { border-color: var(--green); }
-
-  .bypass-submit {
-    padding: 0.55rem 0.9rem;
-    background: var(--green2);
-    border: none;
-    border-radius: 6px;
-    color: var(--green);
-    font-family: inherit;
-    font-size: 0.8rem;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .bypass-submit:hover { background: #15803d; }
-
   /* grass strip */
   .grass {
     position: fixed;
@@ -238,11 +190,6 @@
   <div class="divider"></div>
   <p class="note">clarity-guild.live is briefly offline.<br>check back in a little while.</p>
 
-  <button class="bypass-toggle" id="bypassToggle">have a bypass code?</button>
-  <div class="bypass-form" id="bypassForm">
-    <input class="bypass-input" id="bypassInput" type="text" placeholder="paste your code here" autocomplete="off">
-    <button class="bypass-submit" id="bypassSubmit">go</button>
-  </div>
 </div>
 
 <div class="grass" id="grass"></div>
@@ -259,10 +206,9 @@
 
   // Error messages
   const errors = {
-    unauthorized:  'You\'re not a Clarity guild member. Ask an officer to add you.',
-    invalid_token: 'That bypass code is invalid or has been revoked.',
-    oauth_error:   'Something went wrong with Discord login. Try again.',
-    no_code:       'Discord login was cancelled.',
+    unauthorized: 'You\'re not a Clarity guild member. Ask an officer to add you.',
+    oauth_error:  'Something went wrong with Discord login. Try again.',
+    no_code:      'Discord login was cancelled.',
   };
   const params = new URLSearchParams(window.location.search);
   const err = params.get('error');
@@ -272,21 +218,6 @@
     el.style.display = 'block';
   }
 
-  // Bypass toggle
-  document.getElementById('bypassToggle').addEventListener('click', () => {
-    const form = document.getElementById('bypassForm');
-    form.classList.toggle('open');
-    if (form.classList.contains('open')) document.getElementById('bypassInput').focus();
-  });
-
-  document.getElementById('bypassSubmit').addEventListener('click', () => {
-    const code = document.getElementById('bypassInput').value.trim();
-    if (code) window.location.href = '/auth/bypass/' + encodeURIComponent(code);
-  });
-
-  document.getElementById('bypassInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') document.getElementById('bypassSubmit').click();
-  });
 </script>
 
 </body>
