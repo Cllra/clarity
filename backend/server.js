@@ -1,22 +1,30 @@
-const express = require('express');
-const Database = require('better-sqlite3');
-const cron = require('node-cron');
-const axios = require('axios');
-const cors = require('cors');
-const path = require('path');
+const express       = require('express');
+const Database      = require('better-sqlite3');
+const cron          = require('node-cron');
+const axios         = require('axios');
+const cors          = require('cors');
+const cookieParser  = require('cookie-parser');
+const crypto        = require('crypto');
+const path          = require('path');
 const createGlobalRouter = require('./global');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(cookieParser());
 
-const db = new Database(process.env.DB_PATH || './clarity.db');
-const BDO_API = process.env.BDO_API_URL || 'http://bdo-api:8001';
-const GUILD = process.env.GUILD_NAME || 'clarity';
-const REGION = process.env.REGION || 'EU';
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'changeme';
-const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK || '';
+const db            = new Database(process.env.DB_PATH || './clarity.db');
+const BDO_API       = process.env.BDO_API_URL          || 'http://bdo-api:8001';
+const GUILD         = process.env.GUILD_NAME            || 'clarity';
+const REGION        = process.env.REGION                || 'EU';
+const ADMIN_TOKEN   = process.env.ADMIN_TOKEN           || 'changeme';
+const DISCORD_WEBHOOK    = process.env.DISCORD_WEBHOOK       || '';
+const SESSION_SECRET     = process.env.SESSION_SECRET        || 'changeme-session';
+const DISCORD_CLIENT_ID  = process.env.DISCORD_CLIENT_ID     || '';
+const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
+const DISCORD_GUILD_ID   = process.env.DISCORD_GUILD_ID      || '';
+const DISCORD_ROLE_ID    = process.env.DISCORD_ROLE_ID       || '';
+const BASE_URL           = process.env.BASE_URL              || 'https://clarity-guild.live';
 
 const LIFESKILLS = [
   'gathering','fishing','hunting','cooking','alchemy',
@@ -51,12 +59,68 @@ db.exec(`
   )
 `);
 
-// ── Discord Benachrichtigung ──────────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS auth_users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    discord_id    TEXT UNIQUE,
+    username      TEXT,
+    discriminator TEXT,
+    authorized    INTEGER DEFAULT 1,
+    bypass_token  TEXT UNIQUE,
+    note          TEXT,
+    created_at    TEXT DEFAULT (datetime('now'))
+  )
+`);
+
+// ── Session (signed cookie, no external deps) ────────────────────────────────
+
+function signSession(payload) {
+  const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig  = crypto.createHmac('sha256', SESSION_SECRET).update(data).digest('base64url');
+  return `${data}.${sig}`;
+}
+
+function verifySession(token) {
+  if (!token) return null;
+  const dot = token.lastIndexOf('.');
+  if (dot < 0) return null;
+  const data = token.slice(0, dot);
+  const sig  = token.slice(dot + 1);
+  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(data).digest('base64url');
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(data, 'base64url').toString());
+    if (payload.exp < Date.now()) return null;
+    return payload;
+  } catch { return null; }
+}
+
+const SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+function issueSession(res, discord_id, username) {
+  const token = signSession({ discord_id, username, exp: Date.now() + SESSION_MAX_AGE });
+  res.cookie('cgauth', token, { httpOnly: true, secure: true, sameSite: 'lax', maxAge: SESSION_MAX_AGE });
+}
+
+// ── Auth middleware ──────────────────────────────────────────────────────────
+
+function requireAuth(req, res, next) {
+  // Admin token bypasses session (for GitHub Actions scrapers)
+  if (req.headers['x-admin-token'] === ADMIN_TOKEN) return next();
+
+  const session = verifySession(req.cookies?.cgauth);
+  if (session) { req.user = session; return next(); }
+
+  if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Login required' });
+  res.sendFile(path.join(__dirname, 'public', 'maintenance.html'));
+}
+
+// ── Discord helpers ──────────────────────────────────────────────────────────
+
 async function sendDiscordAlert(message) {
   if (!DISCORD_WEBHOOK) return;
   try {
     await axios.post(DISCORD_WEBHOOK, { content: message });
-    console.log('Discord Benachrichtigung gesendet.');
   } catch (e) {
     console.error('Discord Fehler:', e.message);
   }
@@ -74,7 +138,8 @@ async function fetchWithRetry(url, params, retries = 8, delay = 8000) {
   throw new Error(`Kein Ergebnis nach ${retries} Versuchen`);
 }
 
-// ── Einen einzelnen Scrape-Durchlauf ─────────────────────────────────────────
+// ── Scrape logic ─────────────────────────────────────────────────────────────
+
 async function scrapeOnce(targetDate, existingRows = []) {
   const guild = await fetchWithRetry(`${BDO_API}/v1/guild`, {
     guildName: GUILD, region: REGION
@@ -134,7 +199,6 @@ async function scrapeOnce(targetDate, existingRows = []) {
   return { total: members.length, saved: rows.length, failed };
 }
 
-// ── Hauptfunktion mit Retry-Logik ─────────────────────────────────────────────
 async function fetchAndStore(useYesterday = false) {
   const targetDate = useYesterday
     ? new Date(Date.now() - 86400000).toISOString().split('T')[0]
@@ -142,8 +206,8 @@ async function fetchAndStore(useYesterday = false) {
 
   console.log(`[${new Date().toISOString()}] Starte Datenabruf für ${targetDate}...`);
 
-  const MAX_ATTEMPTS = 3;
-  const RETRY_DELAY_MS = 5 * 60 * 1000; // 5 Minuten
+  const MAX_ATTEMPTS   = 3;
+  const RETRY_DELAY_MS = 5 * 60 * 1000;
 
   let result = { total: 0, saved: 0, failed: [] };
   let existingRows = [];
@@ -176,7 +240,6 @@ async function fetchAndStore(useYesterday = false) {
     }
   }
 
-  // Nach 3 Versuchen immer noch unvollständig → Discord Alert
   if (result.saved < result.total) {
     const missing = result.total - result.saved;
     await sendDiscordAlert(
@@ -188,10 +251,7 @@ async function fetchAndStore(useYesterday = false) {
 let isRunning = false;
 
 async function fetchAndStoreSafe(useYesterday = false) {
-  if (isRunning) {
-    console.log('Scrape läuft bereits, Anfrage ignoriert.');
-    return;
-  }
+  if (isRunning) { console.log('Scrape läuft bereits, Anfrage ignoriert.'); return; }
   isRunning = true;
   try {
     await fetchAndStore(useYesterday);
@@ -200,122 +260,110 @@ async function fetchAndStoreSafe(useYesterday = false) {
   }
 }
 
-// Cron deaktiviert – Scraping läuft via GitHub Actions (.github/workflows/daily-scrape.yml)
-// cron.schedule('0 2 * * *', () => fetchAndStoreSafe(true));
+// ── Discord OAuth routes (public — before auth gate) ─────────────────────────
 
-function calcGain(current, past) {
-  if (past == null || past === '') return null;
-  return specLevelToNumber(current) - specLevelToNumber(past);
-}
-
-app.get('/api/leaderboard/:skill', (req, res) => {
-  const skill = req.params.skill;
-  const validColumns = ['life_fame', ...NUMERIC_SKILLS, ...LIFESKILLS];
-  if (!validColumns.includes(skill)) {
-    return res.status(400).json({ error: 'Unbekannter Skill' });
-  }
-
-  const latestRow = db.prepare('SELECT MAX(date) as date FROM snapshots').get();
-  const latestDate = latestRow?.date || null;
-  if (!latestDate) return res.json([]);
-
-  const sevenDaysAgo = new Date(new Date(latestDate).getTime() - 7 * 86400000).toISOString().split('T')[0];
-  const monthStart = latestDate.substring(0, 7) + '-01';
-
-  const best7d = db.prepare(`
-    SELECT date FROM snapshots WHERE date <= ? AND date < ?
-    GROUP BY date ORDER BY date DESC LIMIT 1
-  `).get(sevenDaysAgo, latestDate) ||
-  db.prepare(`
-    SELECT date FROM snapshots WHERE date < ?
-    GROUP BY date ORDER BY date ASC LIMIT 1
-  `).get(latestDate);
-
-  const bestMonth = db.prepare(`
-    SELECT date FROM snapshots WHERE date <= ? AND date < ?
-    GROUP BY date ORDER BY date DESC LIMIT 1
-  `).get(monthStart, latestDate) ||
-  db.prepare(`
-    SELECT date FROM snapshots WHERE date < ?
-    GROUP BY date ORDER BY date ASC LIMIT 1
-  `).get(latestDate);
-
-  const date7d = best7d?.date || null;
-  const dateMonth = bestMonth?.date || null;
-
-  if (skill === 'life_fame' || NUMERIC_SKILLS.includes(skill)) {
-    const rows = db.prepare(`
-      SELECT
-        t.family_name,
-        t.${skill}   AS current_value,
-        w.${skill}   AS value_7d_ago,
-        m.${skill}   AS value_month_ago
-      FROM snapshots t
-      LEFT JOIN snapshots w ON w.family_name = t.family_name AND w.date = ?
-      LEFT JOIN snapshots m ON m.family_name = t.family_name AND m.date = ?
-      WHERE t.date = ?
-      ORDER BY t.${skill} DESC
-    `).all(date7d, dateMonth, latestDate);
-
-    return res.json(rows.map((row, i) => ({
-      rank: i + 1,
-      name: row.family_name,
-      display: String(row.current_value),
-      gain_7d: row.value_7d_ago != null ? row.current_value - row.value_7d_ago : null,
-      gain_month: row.value_month_ago != null ? row.current_value - row.value_month_ago : null,
-    })));
-  }
-
-  const rows = db.prepare(`
-    SELECT
-      t.family_name,
-      t.spec_${skill}  AS current_spec,
-      w.spec_${skill}  AS spec_7d_ago,
-      m.spec_${skill}  AS spec_month_ago
-    FROM snapshots t
-    LEFT JOIN snapshots w ON w.family_name = t.family_name AND w.date = ?
-    LEFT JOIN snapshots m ON m.family_name = t.family_name AND m.date = ?
-    WHERE t.date = ?
-  `).all(date7d, dateMonth, latestDate);
-
-  const result = rows
-    .map((row) => ({
-      name: row.family_name,
-      display: row.current_spec || '–',
-      numeric: specLevelToNumber(row.current_spec),
-      gain_7d: calcGain(row.current_spec, row.spec_7d_ago),
-      gain_month: calcGain(row.current_spec, row.spec_month_ago),
-    }))
-    .sort((a, b) => b.numeric - a.numeric)
-    .map((row, i) => ({ rank: i + 1, ...row }));
-
-  res.json(result);
+app.get('/auth/discord', (req, res) => {
+  if (!DISCORD_CLIENT_ID) return res.status(503).send('Discord OAuth not configured');
+  const params = new URLSearchParams({
+    client_id:     DISCORD_CLIENT_ID,
+    redirect_uri:  `${BASE_URL}/auth/discord/callback`,
+    response_type: 'code',
+    scope:         'identify guilds.members.read',
+  });
+  res.redirect(`https://discord.com/oauth2/authorize?${params}`);
 });
 
-app.get('/api/lastupdate', (req, res) => {
-  const row = db.prepare('SELECT MAX(date) as last FROM snapshots').get();
-  res.json({ last: row?.last || null });
+app.get('/auth/discord/callback', async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.redirect('/?error=no_code');
+
+  try {
+    const tokenRes = await axios.post(
+      'https://discord.com/api/oauth2/token',
+      new URLSearchParams({
+        client_id:     DISCORD_CLIENT_ID,
+        client_secret: DISCORD_CLIENT_SECRET,
+        grant_type:    'authorization_code',
+        code,
+        redirect_uri:  `${BASE_URL}/auth/discord/callback`,
+      }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
+
+    const accessToken = tokenRes.data.access_token;
+
+    const userRes = await axios.get('https://discord.com/api/users/@me', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    const { id: discord_id, username, discriminator } = userRes.data;
+
+    // Check manual unlock first
+    const manualUser = db.prepare(
+      'SELECT id FROM auth_users WHERE discord_id = ? AND authorized = 1'
+    ).get(discord_id);
+
+    if (!manualUser) {
+      // Must be in the guild with the member role
+      let hasRole = false;
+      try {
+        const memberRes = await axios.get(
+          `https://discord.com/api/users/@me/guilds/${DISCORD_GUILD_ID}/member`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        hasRole = Array.isArray(memberRes.data.roles) && memberRes.data.roles.includes(DISCORD_ROLE_ID);
+      } catch (e) {
+        // 404 = not in guild, others = error
+      }
+
+      if (!hasRole) return res.redirect('/?error=unauthorized');
+    }
+
+    issueSession(res, discord_id, username);
+    console.log(`[auth] ${username} (${discord_id}) logged in`);
+    res.redirect('/');
+  } catch (e) {
+    console.error('Discord OAuth error:', e.message);
+    res.redirect('/?error=oauth_error');
+  }
 });
+
+app.get('/auth/logout', (req, res) => {
+  res.clearCookie('cgauth');
+  res.redirect('/');
+});
+
+app.get('/auth/me', (req, res) => {
+  const session = verifySession(req.cookies?.cgauth);
+  if (!session) return res.status(401).json({ error: 'Not logged in' });
+  res.json({ username: session.username, discord_id: session.discord_id });
+});
+
+app.get('/auth/bypass/:token', (req, res) => {
+  const user = db.prepare(
+    'SELECT * FROM auth_users WHERE bypass_token = ? AND authorized = 1'
+  ).get(req.params.token);
+  if (!user) return res.redirect('/?error=invalid_token');
+
+  issueSession(res, `bypass_${req.params.token.slice(0, 8)}`, user.note || 'guest');
+  res.redirect('/');
+});
+
+// ── Admin routes (x-admin-token, before auth gate) ───────────────────────────
 
 app.post('/api/admin/fetch', async (req, res) => {
   const token = req.headers['x-admin-token'];
-  if (!token || token !== ADMIN_TOKEN) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  if (!token || token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
   const useYesterday = req.query.yesterday === 'true';
   const targetDate = useYesterday
     ? new Date(Date.now() - 86400000).toISOString().split('T')[0]
     : new Date().toISOString().split('T')[0];
-
   res.json({ message: `Scrape gestartet für ${targetDate}` });
   fetchAndStoreSafe(useYesterday);
 });
 
 app.post('/api/admin/bulk-snapshot', async (req, res) => {
   const token = req.headers['x-admin-token'];
-  if (!token || token !== ADMIN_TOKEN) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  if (!token || token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
 
   const { date, snapshots, failed = [] } = req.body;
   if (!date || !Array.isArray(snapshots) || snapshots.length === 0) {
@@ -328,12 +376,7 @@ app.post('/api/admin/bulk-snapshot', async (req, res) => {
     VALUES
       (@date, @family_name, @life_fame, @contribution_points, @energy, ${LIFESKILLS.map(s => `@spec_${s}`).join(', ')})
   `);
-
-  const insertMany = db.transaction((rows) => {
-    for (const row of rows) insert.run({ ...row, date });
-  });
-
-  insertMany(snapshots);
+  db.transaction((rows) => { for (const row of rows) insert.run({ ...row, date }); })(snapshots);
 
   const total = snapshots.length + failed.length;
   console.log(`[${new Date().toISOString()}] bulk-snapshot: ${snapshots.length} Spieler für ${date} gespeichert.`);
@@ -351,11 +394,141 @@ app.post('/api/admin/bulk-snapshot', async (req, res) => {
   res.json({ saved: snapshots.length, date });
 });
 
-// ── Global Leaderboard (additiv, rückbaubar) ──────────────────────────────────
+// Manual user management
+app.post('/api/admin/auth/authorize', (req, res) => {
+  const token = req.headers['x-admin-token'];
+  if (!token || token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { discord_id, username = '', note = '' } = req.body;
+  if (!discord_id) return res.status(400).json({ error: 'discord_id required' });
+
+  db.prepare(`
+    INSERT INTO auth_users (discord_id, username, authorized, note) VALUES (?, ?, 1, ?)
+    ON CONFLICT(discord_id) DO UPDATE SET authorized=1, username=excluded.username, note=excluded.note
+  `).run(discord_id, username, note);
+
+  res.json({ ok: true, discord_id });
+});
+
+app.post('/api/admin/auth/bypass', (req, res) => {
+  const token = req.headers['x-admin-token'];
+  if (!token || token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { note = '' } = req.body;
+  const bypass_token = crypto.randomBytes(24).toString('hex');
+  db.prepare('INSERT INTO auth_users (bypass_token, authorized, note) VALUES (?, 1, ?)').run(bypass_token, note);
+
+  res.json({ bypass_url: `${BASE_URL}/auth/bypass/${bypass_token}`, note });
+});
+
+app.get('/api/admin/auth/users', (req, res) => {
+  const token = req.headers['x-admin-token'];
+  if (!token || token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+
+  const users = db.prepare(
+    'SELECT id, discord_id, username, authorized, note, created_at, (bypass_token IS NOT NULL) as has_bypass FROM auth_users'
+  ).all();
+  res.json(users);
+});
+
+app.delete('/api/admin/auth/revoke/:id', (req, res) => {
+  const token = req.headers['x-admin-token'];
+  if (!token || token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+
+  db.prepare('UPDATE auth_users SET authorized = 0 WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ── Global router (admin routes in it bypass via x-admin-token in requireAuth) ─
 const globalRouter = createGlobalRouter({ db, BDO_API, ADMIN_TOKEN });
 app.use('/api/global', globalRouter);
 
-// /world-Route vor dem Catch-all
+// ── Auth gate — everything below requires a valid session ─────────────────────
+app.use(requireAuth);
+
+// Static assets (logo, etc.) — served only to authenticated users
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ── Protected routes ──────────────────────────────────────────────────────────
+
+function calcGain(current, past) {
+  if (past == null || past === '') return null;
+  return specLevelToNumber(current) - specLevelToNumber(past);
+}
+
+app.get('/api/leaderboard/:skill', (req, res) => {
+  const skill = req.params.skill;
+  const validColumns = ['life_fame', ...NUMERIC_SKILLS, ...LIFESKILLS];
+  if (!validColumns.includes(skill)) return res.status(400).json({ error: 'Unbekannter Skill' });
+
+  const latestRow = db.prepare('SELECT MAX(date) as date FROM snapshots').get();
+  const latestDate = latestRow?.date || null;
+  if (!latestDate) return res.json([]);
+
+  const sevenDaysAgo  = new Date(new Date(latestDate).getTime() - 7 * 86400000).toISOString().split('T')[0];
+  const monthStart    = latestDate.substring(0, 7) + '-01';
+
+  const best7d = db.prepare(`
+    SELECT date FROM snapshots WHERE date <= ? AND date < ?
+    GROUP BY date ORDER BY date DESC LIMIT 1
+  `).get(sevenDaysAgo, latestDate) ||
+  db.prepare(`SELECT date FROM snapshots WHERE date < ? GROUP BY date ORDER BY date ASC LIMIT 1`).get(latestDate);
+
+  const bestMonth = db.prepare(`
+    SELECT date FROM snapshots WHERE date <= ? AND date < ?
+    GROUP BY date ORDER BY date DESC LIMIT 1
+  `).get(monthStart, latestDate) ||
+  db.prepare(`SELECT date FROM snapshots WHERE date < ? GROUP BY date ORDER BY date ASC LIMIT 1`).get(latestDate);
+
+  const date7d    = best7d?.date    || null;
+  const dateMonth = bestMonth?.date || null;
+
+  if (skill === 'life_fame' || NUMERIC_SKILLS.includes(skill)) {
+    const rows = db.prepare(`
+      SELECT t.family_name, t.${skill} AS current_value, w.${skill} AS value_7d_ago, m.${skill} AS value_month_ago
+      FROM snapshots t
+      LEFT JOIN snapshots w ON w.family_name = t.family_name AND w.date = ?
+      LEFT JOIN snapshots m ON m.family_name = t.family_name AND m.date = ?
+      WHERE t.date = ?
+      ORDER BY t.${skill} DESC
+    `).all(date7d, dateMonth, latestDate);
+
+    return res.json(rows.map((row, i) => ({
+      rank: i + 1,
+      name: row.family_name,
+      display: String(row.current_value),
+      gain_7d:    row.value_7d_ago    != null ? row.current_value - row.value_7d_ago    : null,
+      gain_month: row.value_month_ago != null ? row.current_value - row.value_month_ago : null,
+    })));
+  }
+
+  const rows = db.prepare(`
+    SELECT t.family_name, t.spec_${skill} AS current_spec, w.spec_${skill} AS spec_7d_ago, m.spec_${skill} AS spec_month_ago
+    FROM snapshots t
+    LEFT JOIN snapshots w ON w.family_name = t.family_name AND w.date = ?
+    LEFT JOIN snapshots m ON m.family_name = t.family_name AND m.date = ?
+    WHERE t.date = ?
+  `).all(date7d, dateMonth, latestDate);
+
+  const result = rows
+    .map(row => ({
+      name:       row.family_name,
+      display:    row.current_spec || '–',
+      numeric:    specLevelToNumber(row.current_spec),
+      gain_7d:    calcGain(row.current_spec, row.spec_7d_ago),
+      gain_month: calcGain(row.current_spec, row.spec_month_ago),
+    }))
+    .sort((a, b) => b.numeric - a.numeric)
+    .map((row, i) => ({ rank: i + 1, ...row }));
+
+  res.json(result);
+});
+
+app.get('/api/lastupdate', (req, res) => {
+  const row = db.prepare('SELECT MAX(date) as last FROM snapshots').get();
+  res.json({ last: row?.last || null });
+});
+
 app.get('/world', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'world.html'));
 });
