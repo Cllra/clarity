@@ -309,9 +309,10 @@ app.get('/auth/discord/callback', async (req, res) => {
           `https://discord.com/api/users/@me/guilds/${DISCORD_GUILD_ID}/member`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
+        console.log(`[auth] member roles: ${JSON.stringify(memberRes.data.roles)}, checking for: ${DISCORD_ROLE_ID}`);
         hasRole = Array.isArray(memberRes.data.roles) && memberRes.data.roles.includes(DISCORD_ROLE_ID);
       } catch (e) {
-        // 404 = not in guild, others = error
+        console.error(`[auth] member fetch failed: ${e.response?.status} ${JSON.stringify(e.response?.data)}`);
       }
 
       if (!hasRole) return res.redirect('/?error=unauthorized');

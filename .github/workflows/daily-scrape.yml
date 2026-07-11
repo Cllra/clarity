@@ -1,8 +1,6 @@
 name: Daily Scrape
 
 on:
-  schedule:
-    - cron: '0 2 * * *'   # 2 AM UTC täglich (= 4 AM CEST / 3 AM CET)
   workflow_dispatch:
     inputs:
       date:

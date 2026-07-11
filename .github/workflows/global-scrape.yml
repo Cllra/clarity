@@ -1,8 +1,6 @@
 name: Global Scrape — Run 1
 
 on:
-  schedule:
-    - cron: '0 3 * * *'   # 3 AM UTC daily
   workflow_dispatch:
     inputs:
       date:
