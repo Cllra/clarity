@@ -1,0 +1,51 @@
+name: Guild Comparison Scrape
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: 'Date to scrape (YYYY-MM-DD), default: yesterday'
+        required: false
+        default: ''
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create Docker network
+        run: docker network create clarity-net
+
+      - name: Start Redis
+        run: |
+          docker run -d --name clarity-redis \
+            --network clarity-net \
+            redis:7-alpine
+
+      - name: Start bdo-api
+        run: |
+          docker run -d --name bdo-api \
+            --network clarity-net \
+            -p 8001:8001 \
+            man90/bdo-rest-api:latest \
+            -redis redis://clarity-redis:6379/0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: scraper
+        run: npm install
+
+      - name: Run guild comparison scrape
+        working-directory: scraper
+        env:
+          BDO_API_URL: http://localhost:8001
+          CLARITY_SERVER_URL: https://clarity-guild.live
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          TARGET_DATE: ${{ github.event.inputs.target_date }}
+          GUILDS: notclara,gaxo,xyreses
+        run: node scrape-guilds.js
