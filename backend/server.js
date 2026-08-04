@@ -315,7 +315,11 @@ app.get('/auth/discord/callback', async (req, res) => {
         console.error(`[auth] member fetch failed: ${e.response?.status} ${JSON.stringify(e.response?.data)}`);
       }
 
-      if (!hasRole) return res.redirect('/?error=unauthorized');
+      if (!hasRole) {
+        console.log(`[auth] ${username} (${discord_id}) rejected — no Clarity role`);
+        sendDiscordAlert(`❌ **${username}** tried to log in — not a Clarity member`).catch(() => {});
+        return res.redirect('/?error=unauthorized');
+      }
     }
 
     issueSession(res, discord_id, username);
