@@ -71,6 +71,25 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS login_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    discord_id TEXT,
+    username   TEXT,
+    success    INTEGER NOT NULL,
+    reason     TEXT,
+    at         TEXT DEFAULT (datetime('now'))
+  )
+`);
+
+const stmtLogLogin = db.prepare(
+  `INSERT INTO login_log (discord_id, username, success, reason) VALUES (?, ?, ?, ?)`
+);
+
+function logLogin(discord_id, username, success, reason = null) {
+  try { stmtLogLogin.run(discord_id, username, success ? 1 : 0, reason); } catch {}
+}
+
 // ── Session (signed cookie, no external deps) ────────────────────────────────
 
 function signSession(payload) {
@@ -317,17 +336,20 @@ app.get('/auth/discord/callback', async (req, res) => {
 
       if (!hasRole) {
         console.log(`[auth] ${username} (${discord_id}) rejected — no Clarity role`);
+        logLogin(discord_id, username, false, 'no_role');
         sendDiscordAlert(`❌ **${username}** tried to log in — not a Clarity member`).catch(() => {});
         return res.redirect('/?error=unauthorized');
       }
     }
 
     issueSession(res, discord_id, username);
+    logLogin(discord_id, username, true);
     console.log(`[auth] ${username} (${discord_id}) logged in`);
     sendDiscordAlert(`🔐 **${username}** logged into clarity-guild.live`).catch(() => {});
     res.redirect('/');
   } catch (e) {
     console.error('Discord OAuth error:', e.message);
+    logLogin(null, null, false, 'oauth_error');
     res.redirect('/?error=oauth_error');
   }
 });
@@ -413,6 +435,17 @@ app.get('/api/admin/auth/users', (req, res) => {
     'SELECT id, discord_id, username, authorized, note, created_at FROM auth_users'
   ).all();
   res.json(users);
+});
+
+app.get('/api/admin/auth/login-log', (req, res) => {
+  const token = req.headers['x-admin-token'];
+  if (!token || token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+
+  const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
+  const rows = db.prepare(
+    `SELECT id, discord_id, username, success, reason, at FROM login_log ORDER BY id DESC LIMIT ?`
+  ).all(limit);
+  res.json(rows);
 });
 
 app.delete('/api/admin/auth/revoke/:id', (req, res) => {
