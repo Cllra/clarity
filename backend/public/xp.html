@@ -28,12 +28,15 @@ button{width:100%;background:var(--bg3);border:1px solid var(--gold-dim);color:v
  font-size:13px;font-weight:600;letter-spacing:3px;text-transform:uppercase;padding:11px;cursor:pointer;transition:all .2s}
 button:hover{background:var(--border)}
 .err{color:var(--red);font-size:13px;margin-top:10px;min-height:18px}
+.periods{display:flex;gap:8px;margin-bottom:14px}
 .tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:22px}
 .tab{background:var(--bg3);border:1px solid var(--border);color:var(--text-dim);font-size:13px;font-weight:500;
  letter-spacing:1.5px;text-transform:uppercase;padding:8px 15px;cursor:pointer;width:auto;
  clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)}
 .tab:hover{color:var(--gold2)}
 .tab.on{background:var(--border);color:var(--gold);border-color:var(--gold-dim)}
+.per{font-size:12px;letter-spacing:2px;padding:7px 18px}
+.per.on{background:var(--gold-dim);color:#fff;border-color:var(--gold-dim)}
 table{width:100%;border-collapse:collapse}
 th{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim);font-weight:600;
  text-align:right;padding:0 10px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
@@ -88,20 +91,27 @@ function gate(msg) {
   document.getElementById('pw').onkeydown = (e) => { if (e.key === 'Enter') send(); };
 }
 
+const state = { period: 'year', active: 'overall' };
+
 function render(d) {
-  document.getElementById('sub').textContent = `${d.year} · ${d.from} to ${d.to}`;
+  document.getElementById('sub').textContent = `${d.label} · ${d.from} to ${d.to}`;
   const tabs = ['overall', ...d.skills];
-  let active = 'overall';
+  if (!tabs.includes(state.active)) state.active = 'overall';
   const draw = () => {
+    const active = state.active;
     const isAll = active === 'overall';
     const s = isAll ? null : d.perSkill[active];
     const rows = isAll ? d.overall : s.rows;
     app.innerHTML = `
+      <div class="periods">
+        <button class="tab per ${d.period==='year'?'on':''}" data-p="year">Year ${d.year}</button>
+        <button class="tab per ${d.period==='month'?'on':''}" data-p="month">Monthly</button>
+      </div>
       <div class="tabs">${tabs.map(t => `<button class="tab ${t===active?'on':''}" data-t="${t}">${t==='overall'?'★ Overall':LABEL[t]}</button>`).join('')}</div>
       <p class="meta">${isAll
         ? `${rows.length} players with gains · ${fmt(rows.reduce((a,b)=>a+b.xp,0))} total`
         : `${s.players} players with gains · ${fmt(s.total)} total`}</p>
-      <table><thead><tr><th class="rk">#</th><th>Family</th>${isAll?'':'<th>Levels</th><th>Progress</th>'}<th>XP ${d.year}</th></tr></thead>
+      <table><thead><tr><th class="rk">#</th><th>Family</th>${isAll?'':'<th>Levels</th><th>Progress</th>'}<th>XP ${d.label}</th></tr></thead>
       <tbody>${rows.map(r => `<tr>
         <td class="rk ${r.rank<=3?'rk'+r.rank:''}">${r.rank<=3?['🥇','🥈','🥉'][r.rank-1]:r.rank}</td>
         <td>${r.name}</td>
@@ -110,16 +120,22 @@ function render(d) {
       <p class="note">Computed from the daily snapshots: total XP at the last reading minus the first,
         sorted on the exact values, shortened only for display — hover a number to see it in full;
         per lifeskill on its own scale — barter sits about a thousand times lower than the rest, so a barter level
-        is not comparable to a cooking level. Players tracked from later in the year count from their first
-        snapshot; where the starting value is missing, that skill is left out. ${d.note}</p>`;
-    app.querySelectorAll('.tab').forEach(b => b.onclick = () => { active = b.dataset.t; draw(); });
+        is not comparable to a cooking level. Players tracked from later in the period count from their first
+        snapshot; where the starting value is missing, that skill is left out.
+        ${d.period === 'month' ? 'Monthly gains run from the first snapshot of the current month.' : ''} ${d.note}</p>`;
+    app.querySelectorAll('.tab[data-t]').forEach(b => b.onclick = () => { state.active = b.dataset.t; draw(); });
+    app.querySelectorAll('.tab[data-p]').forEach(b => b.onclick = () => {
+      if (b.dataset.p === state.period) return;
+      state.period = b.dataset.p;
+      load();
+    });
   };
   draw();
 }
 
 function load() {
   app.innerHTML = '<p class="meta">Loading …</p>';
-  fetch('/api/xp/ranking?year=2026')
+  fetch(`/api/xp/ranking?year=2026&period=${state.period}`)
     .then(r => r.status === 401 ? gate() : r.json().then(render))
     .catch(() => { app.innerHTML = '<p class="meta">Could not load the data.</p>'; });
 }

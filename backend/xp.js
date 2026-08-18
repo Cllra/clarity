@@ -23,6 +23,13 @@ const xpTotal = (spec, skill) => {
   const i = LEVEL_INDEX.get((spec || '').trim());
   return i == null ? null : XP.xpTotal[skill]?.[i] ?? null;
 };
+// Anzeigename des laufenden Monats, englisch wie der Rest der Seite.
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+const monthLabel = (date) => {
+  const [y, m] = date.split('-');
+  return `${MONTHS[parseInt(m, 10) - 1]} ${y}`;
+};
 const specToNumber = (spec) => {
   if (!spec) return 0;
   const p = String(spec).toLowerCase().trim().split(/\s+/);
@@ -68,10 +75,18 @@ module.exports = function xpRouter(db, { password, sessionSecret }) {
   router.get('/ranking', (req, res) => {
     if (!valid(req.cookies?.[COOKIE])) return res.status(401).json({ error: 'Login required' });
     const year = /^\d{4}$/.test(req.query.year || '') ? req.query.year : '2026';
+    const monthly = req.query.period === 'month';
+
+    // Der laufende Monat haengt am letzten Snapshot, nicht an der Serveruhr:
+    // sonst steht die Seite am Monatsersten vor dem Scrape leer da.
+    const latest = db.prepare('SELECT MAX(date) AS date FROM snapshots').get()?.date;
+    const monthStart = `${(latest || `${year}-01-01`).substring(0, 7)}-01`;
+    const fromDate = monthly ? monthStart : `${year}-01-01`;
+    const toDate = monthly ? (latest || monthStart) : `${year}-12-31`;
 
     const rows = db.prepare(
       'SELECT * FROM snapshots WHERE date >= ? AND date <= ? ORDER BY date'
-    ).all(`${year}-01-01`, `${year}-12-31`);
+    ).all(fromDate, toDate);
 
     const first = new Map(); const last = new Map();
     for (const r of rows) {
@@ -115,6 +130,8 @@ module.exports = function xpRouter(db, { password, sessionSecret }) {
 
     res.json({
       year,
+      period: monthly ? 'month' : 'year',
+      label: monthly ? monthLabel(fromDate) : year,
       from: rows.length ? rows[0].date : null,
       to: rows.length ? rows[rows.length - 1].date : null,
       skills: SKILLS,
