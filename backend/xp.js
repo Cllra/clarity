@@ -58,7 +58,7 @@ module.exports = function xpRouter(db, { password, sessionSecret }) {
     const given = String(req.body?.password || '');
     const ok = given.length === password.length
       && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(password));
-    if (!ok) return res.status(401).json({ error: 'Falsches Passwort' });
+    if (!ok) return res.status(401).json({ error: 'Wrong password' });
     res.cookie(COOKIE, sign(Date.now() + MAX_AGE), {
       httpOnly: true, secure: true, sameSite: 'lax', maxAge: MAX_AGE,
     });
@@ -120,7 +120,7 @@ module.exports = function xpRouter(db, { password, sessionSecret }) {
       skills: SKILLS,
       perSkill,
       overall,
-      note: 'Trading fehlt: die XP-Tabelle enthaelt dort nur Platzhalter.',
+      note: 'Trading is excluded: the XP table only holds placeholder values there.',
     });
   });
 

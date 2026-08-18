@@ -54,35 +54,35 @@ td:nth-child(2){text-align:left}
   <a class="back" href="/">← Leaderboard</a>
   <div class="eyebrow">Black Desert Online · EU</div>
   <h1>XP RANKING</h1>
-  <div class="sub" id="sub">Lifeskill-XP je Jahr</div>
+  <div class="sub" id="sub">Lifeskill XP per year</div>
 </div>
 <div class="wrap" id="app"></div>
 
 <script>
 const app = document.getElementById('app');
-const fmt = (n) => (n / 1e9).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' Mrd';
+const fmt = (n) => (n / 1e9).toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' bn';
 const LABEL = { cooking:'🍳 Cooking', processing:'⚙️ Processing', gathering:'🌿 Gathering', hunting:'🏹 Hunting',
   alchemy:'⚗️ Alchemy', farming:'🌾 Farming', training:'🐴 Training', fishing:'🎣 Fishing',
   sailing:'⛵ Sailing', barter:'🚢 Barter' };
 
 function gate(msg) {
   app.innerHTML = `<div class="gate">
-      <input id="pw" type="password" placeholder="PASSWORT" autofocus>
-      <button id="go">Anmelden</button>
+      <input id="pw" type="password" placeholder="PASSWORD" autofocus>
+      <button id="go">Sign in</button>
       <div class="err">${msg || ''}</div>
     </div>`;
   const send = () => {
     const pw = document.getElementById('pw').value;
     fetch('/api/xp/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ password: pw }) })
-      .then(r => r.ok ? load() : r.json().then(j => gate(j.error || 'Falsches Passwort')))
-      .catch(() => gate('Verbindung fehlgeschlagen'));
+      .then(r => r.ok ? load() : r.json().then(j => gate(j.error || 'Wrong password')))
+      .catch(() => gate('Connection failed'));
   };
   document.getElementById('go').onclick = send;
   document.getElementById('pw').onkeydown = (e) => { if (e.key === 'Enter') send(); };
 }
 
 function render(d) {
-  document.getElementById('sub').textContent = `${d.year} · ${d.from} bis ${d.to}`;
+  document.getElementById('sub').textContent = `${d.year} · ${d.from} to ${d.to}`;
   const tabs = ['overall', ...d.skills];
   let active = 'overall';
   const draw = () => {
@@ -90,30 +90,30 @@ function render(d) {
     const s = isAll ? null : d.perSkill[active];
     const rows = isAll ? d.overall : s.rows;
     app.innerHTML = `
-      <div class="tabs">${tabs.map(t => `<button class="tab ${t===active?'on':''}" data-t="${t}">${t==='overall'?'★ Gesamt':LABEL[t]}</button>`).join('')}</div>
+      <div class="tabs">${tabs.map(t => `<button class="tab ${t===active?'on':''}" data-t="${t}">${t==='overall'?'★ Overall':LABEL[t]}</button>`).join('')}</div>
       <p class="meta">${isAll
-        ? `${rows.length} Spieler mit Zuwachs · zusammen ${fmt(rows.reduce((a,b)=>a+b.xp,0))}`
-        : `${s.players} Spieler mit Zuwachs · zusammen ${fmt(s.total)}`}</p>
-      <table><thead><tr><th class="rk">#</th><th>Familie</th>${isAll?'':'<th>Level</th><th>Fortschritt</th>'}<th>XP ${d.year}</th></tr></thead>
+        ? `${rows.length} players with gains · ${fmt(rows.reduce((a,b)=>a+b.xp,0))} total`
+        : `${s.players} players with gains · ${fmt(s.total)} total`}</p>
+      <table><thead><tr><th class="rk">#</th><th>Family</th>${isAll?'':'<th>Levels</th><th>Progress</th>'}<th>XP ${d.year}</th></tr></thead>
       <tbody>${rows.map(r => `<tr>
         <td class="rk ${r.rank<=3?'rk'+r.rank:''}">${r.rank<=3?['🥇','🥈','🥉'][r.rank-1]:r.rank}</td>
         <td>${r.name}</td>
         ${isAll?'':`<td class="lv">+${r.levels}</td><td class="prog">${r.from} → ${r.to}</td>`}
         <td class="xp">${fmt(r.xp)}</td></tr>`).join('')}</tbody></table>
-      <p class="note">Gerechnet aus den täglichen Snapshots: XP-Summe des letzten Standes minus die des ersten,
-        je Lifeskill mit seiner eigenen Skala — Barter liegt rund tausendfach niedriger als der Rest, ein Barter-Level
-        ist also nicht mit einem Cooking-Level vergleichbar. Wer im Jahr erst später erfasst wurde, wird ab seinem
-        ersten Snapshot gewertet; wo der Startwert fehlt, bleibt der Skill außen vor. ${d.note}</p>`;
+      <p class="note">Computed from the daily snapshots: total XP at the last reading minus the first,
+        per lifeskill on its own scale — barter sits about a thousand times lower than the rest, so a barter level
+        is not comparable to a cooking level. Players tracked from later in the year count from their first
+        snapshot; where the starting value is missing, that skill is left out. ${d.note}</p>`;
     app.querySelectorAll('.tab').forEach(b => b.onclick = () => { active = b.dataset.t; draw(); });
   };
   draw();
 }
 
 function load() {
-  app.innerHTML = '<p class="meta">Lade …</p>';
+  app.innerHTML = '<p class="meta">Loading …</p>';
   fetch('/api/xp/ranking?year=2026')
     .then(r => r.status === 401 ? gate() : r.json().then(render))
-    .catch(() => { app.innerHTML = '<p class="meta">Daten konnten nicht geladen werden.</p>'; });
+    .catch(() => { app.innerHTML = '<p class="meta">Could not load the data.</p>'; });
 }
 fetch('/api/xp/session').then(r => r.json()).then(j => j.ok ? load() : gate()).catch(() => gate());
 </script>
