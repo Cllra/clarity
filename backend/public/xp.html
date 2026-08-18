@@ -60,8 +60,8 @@ td:nth-child(2){text-align:left}
 
 <script>
 const app = document.getElementById('app');
-// Kleine Werte brauchen mehr Aufloesung: unter 1 Mrd zeigten sonst zwei
-// Spieler "0.0 bn", obwohl Faktor 11 dazwischen liegt.
+// Small values need more resolution: at one decimal two players both showed
+// "0.0 bn" while one had eleven times the XP of the other.
 const fmt = (n) => {
   if (n >= 1e9)  return (n / 1e9).toFixed(2) + ' bn';
   if (n >= 1e6)  return (n / 1e6).toFixed(1) + ' M';
