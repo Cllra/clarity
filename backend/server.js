@@ -7,6 +7,7 @@ const cookieParser  = require('cookie-parser');
 const crypto        = require('crypto');
 const path          = require('path');
 const createGlobalRouter = require('./global');
+const createXpRouter     = require('./xp');
 
 const app = express();
 app.use(cors());
@@ -459,6 +460,13 @@ app.delete('/api/admin/auth/revoke/:id', (req, res) => {
 // ── Global router (admin routes in it bypass via x-admin-token in requireAuth) ─
 const globalRouter = createGlobalRouter({ db, BDO_API, ADMIN_TOKEN });
 app.use('/api/global', globalRouter);
+
+// XP-Rangliste: eigener Passwortzugang, deshalb VOR dem Discord-Gate.
+app.use('/api/xp', createXpRouter(db, {
+  password: process.env.XP_PASSWORD || 'reinda',
+  sessionSecret: SESSION_SECRET,
+}));
+app.get('/xp', (req, res) => res.sendFile(path.join(__dirname, 'public', 'xp.html')));
 
 // ── Auth gate — everything below requires a valid session ─────────────────────
 app.use(requireAuth);
