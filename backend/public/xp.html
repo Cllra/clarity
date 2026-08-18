@@ -60,7 +60,14 @@ td:nth-child(2){text-align:left}
 
 <script>
 const app = document.getElementById('app');
-const fmt = (n) => (n / 1e9).toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' bn';
+// Kleine Werte brauchen mehr Aufloesung: unter 1 Mrd zeigten sonst zwei
+// Spieler "0.0 bn", obwohl Faktor 11 dazwischen liegt.
+const fmt = (n) => {
+  if (n >= 1e9)  return (n / 1e9).toFixed(2) + ' bn';
+  if (n >= 1e6)  return (n / 1e6).toFixed(1) + ' M';
+  return n.toLocaleString('en-US');
+};
+const exact = (n) => n.toLocaleString('en-US') + ' XP';
 const LABEL = { cooking:'🍳 Cooking', processing:'⚙️ Processing', gathering:'🌿 Gathering', hunting:'🏹 Hunting',
   alchemy:'⚗️ Alchemy', farming:'🌾 Farming', training:'🐴 Training', fishing:'🎣 Fishing',
   sailing:'⛵ Sailing', barter:'🚢 Barter' };
@@ -99,8 +106,9 @@ function render(d) {
         <td class="rk ${r.rank<=3?'rk'+r.rank:''}">${r.rank<=3?['🥇','🥈','🥉'][r.rank-1]:r.rank}</td>
         <td>${r.name}</td>
         ${isAll?'':`<td class="lv">+${r.levels}</td><td class="prog">${r.from} → ${r.to}</td>`}
-        <td class="xp">${fmt(r.xp)}</td></tr>`).join('')}</tbody></table>
+        <td class="xp" title="${exact(r.xp)}">${fmt(r.xp)}</td></tr>`).join('')}</tbody></table>
       <p class="note">Computed from the daily snapshots: total XP at the last reading minus the first,
+        sorted on the exact values, shortened only for display — hover a number to see it in full;
         per lifeskill on its own scale — barter sits about a thousand times lower than the rest, so a barter level
         is not comparable to a cooking level. Players tracked from later in the year count from their first
         snapshot; where the starting value is missing, that skill is left out. ${d.note}</p>`;
