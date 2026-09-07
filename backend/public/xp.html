@@ -20,14 +20,9 @@ a{color:inherit}
 h1{font-family:'Cinzel',serif;font-size:30px;margin:6px 0 2px;color:var(--gold);text-shadow:0 0 24px var(--glow)}
 .sub{font-size:13px;color:var(--text-dim);letter-spacing:2px;text-transform:uppercase}
 .wrap{max-width:1100px;margin:0 auto;padding:24px 20px 60px}
-.gate{max-width:340px;margin:60px auto;text-align:center}
-input{width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:inherit;
- font-size:16px;padding:11px 13px;text-align:center;letter-spacing:3px;margin-bottom:12px}
-input:focus{outline:none;border-color:var(--gold-dim)}
-button{width:100%;background:var(--bg3);border:1px solid var(--gold-dim);color:var(--gold);font-family:inherit;
+button{background:var(--bg3);border:1px solid var(--gold-dim);color:var(--gold);font-family:inherit;
  font-size:13px;font-weight:600;letter-spacing:3px;text-transform:uppercase;padding:11px;cursor:pointer;transition:all .2s}
 button:hover{background:var(--border)}
-.err{color:var(--red);font-size:13px;margin-top:10px;min-height:18px}
 .periods{display:flex;gap:8px;margin-bottom:14px}
 .tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:22px}
 .tab{background:var(--bg3);border:1px solid var(--border);color:var(--text-dim);font-size:13px;font-weight:500;
@@ -75,22 +70,6 @@ const LABEL = { cooking:'🍳 Cooking', processing:'⚙️ Processing', gatherin
   alchemy:'⚗️ Alchemy', farming:'🌾 Farming', training:'🐴 Training', fishing:'🎣 Fishing',
   sailing:'⛵ Sailing', barter:'🚢 Barter' };
 
-function gate(msg) {
-  app.innerHTML = `<div class="gate">
-      <input id="pw" type="password" placeholder="PASSWORD" autofocus>
-      <button id="go">Sign in</button>
-      <div class="err">${msg || ''}</div>
-    </div>`;
-  const send = () => {
-    const pw = document.getElementById('pw').value;
-    fetch('/api/xp/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ password: pw }) })
-      .then(r => r.ok ? load() : r.json().then(j => gate(j.error || 'Wrong password')))
-      .catch(() => gate('Connection failed'));
-  };
-  document.getElementById('go').onclick = send;
-  document.getElementById('pw').onkeydown = (e) => { if (e.key === 'Enter') send(); };
-}
-
 const state = { period: 'year', active: 'overall' };
 
 function render(d) {
@@ -136,10 +115,11 @@ function render(d) {
 function load() {
   app.innerHTML = '<p class="meta">Loading …</p>';
   fetch(`/api/xp/ranking?year=2026&period=${state.period}`)
-    .then(r => r.status === 401 ? gate() : r.json().then(render))
+    .then(r => r.json())
+    .then(render)
     .catch(() => { app.innerHTML = '<p class="meta">Could not load the data.</p>'; });
 }
-fetch('/api/xp/session').then(r => r.json()).then(j => j.ok ? load() : gate()).catch(() => gate());
+load();
 </script>
 </body>
 </html>

@@ -1,14 +1,14 @@
 // XP-Rangliste je Lifeskill.
 //
-// Eigener Zugang per Passwort, unabhaengig vom Discord-Login: die Seite ist
-// fuer Gildenmitglieder ohne Discord-Rolle gedacht. Deshalb wird dieser Router
-// VOR app.use(requireAuth) eingehaengt.
+// Oeffentlich, ohne Login: die Seite ist fuer Gildenmitglieder ohne
+// Discord-Rolle gedacht. Deshalb wird dieser Router VOR app.use(requireAuth)
+// eingehaengt. Der frueher davorstehende Passwortschutz ist raus; das
+// Discord-Gate fuer den Rest der Seite bleibt unberuehrt.
 //
 // Gerechnet wird mit der Lifeskill-XP-Tabelle (flockenberger): je Skill eine
 // eigene Spalte. Barter hat eine eigene Skala, Trading enthaelt nur Platzhalter
 // und bleibt deshalb aussen vor.
 const express = require('express');
-const crypto = require('crypto');
 const XP = require('./lifeskill_xp.json');
 
 const RANK_OFFSETS = {
@@ -36,44 +36,10 @@ const specToNumber = (spec) => {
   return (RANK_OFFSETS[p[0]] ?? 0) + (parseInt(p[1], 10) || 0);
 };
 
-module.exports = function xpRouter(db, { password, sessionSecret }) {
+module.exports = function xpRouter(db) {
   const router = express.Router();
-  const COOKIE = 'cgxp';
-  const MAX_AGE = 30 * 24 * 60 * 60 * 1000;
-
-  const sign = (exp) => {
-    const data = Buffer.from(JSON.stringify({ xp: true, exp })).toString('base64url');
-    const sig = crypto.createHmac('sha256', sessionSecret).update(data).digest('base64url');
-    return `${data}.${sig}`;
-  };
-  const valid = (token) => {
-    if (!token) return false;
-    const dot = token.lastIndexOf('.');
-    if (dot < 0) return false;
-    const data = token.slice(0, dot);
-    const expected = crypto.createHmac('sha256', sessionSecret).update(data).digest('base64url');
-    const given = Buffer.from(token.slice(dot + 1));
-    if (given.length !== Buffer.from(expected).length) return false;
-    if (!crypto.timingSafeEqual(given, Buffer.from(expected))) return false;
-    try { return JSON.parse(Buffer.from(data, 'base64url').toString()).exp > Date.now(); }
-    catch { return false; }
-  };
-
-  router.get('/session', (req, res) => res.json({ ok: valid(req.cookies?.[COOKIE]) }));
-
-  router.post('/login', (req, res) => {
-    const given = String(req.body?.password || '');
-    const ok = given.length === password.length
-      && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(password));
-    if (!ok) return res.status(401).json({ error: 'Wrong password' });
-    res.cookie(COOKIE, sign(Date.now() + MAX_AGE), {
-      httpOnly: true, secure: true, sameSite: 'lax', maxAge: MAX_AGE,
-    });
-    res.json({ ok: true });
-  });
 
   router.get('/ranking', (req, res) => {
-    if (!valid(req.cookies?.[COOKIE])) return res.status(401).json({ error: 'Login required' });
     const year = /^\d{4}$/.test(req.query.year || '') ? req.query.year : '2026';
     const monthly = req.query.period === 'month';
 

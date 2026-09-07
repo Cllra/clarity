@@ -461,11 +461,8 @@ app.delete('/api/admin/auth/revoke/:id', (req, res) => {
 const globalRouter = createGlobalRouter({ db, BDO_API, ADMIN_TOKEN });
 app.use('/api/global', globalRouter);
 
-// XP-Rangliste: eigener Passwortzugang, deshalb VOR dem Discord-Gate.
-app.use('/api/xp', createXpRouter(db, {
-  password: process.env.XP_PASSWORD || 'reinda',
-  sessionSecret: SESSION_SECRET,
-}));
+// XP-Rangliste: oeffentlich, deshalb VOR dem Discord-Gate.
+app.use('/api/xp', createXpRouter(db));
 app.get('/xp', (req, res) => res.sendFile(path.join(__dirname, 'public', 'xp.html')));
 
 // ── Auth gate — everything below requires a valid session ─────────────────────
