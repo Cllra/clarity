@@ -1,8 +1,6 @@
 name: Global Scrape — Run 2
 
 on:
-  schedule:
-    - cron: '0 6 * * *'   # 6 AM UTC daily (picks up players missed by run 1)
   workflow_dispatch:
     inputs:
       date:
