@@ -6,6 +6,9 @@ const REGION     = process.env.REGION              || 'EU';
 const SERVER_URL = process.env.CLARITY_SERVER_URL  || 'https://clarity-guild.live';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const TARGET_DATE = process.env.TARGET_DATE        || null;
+// Nach dieser Laufzeit aufhören und senden, was da ist — ein vom Workflow-Timeout
+// abgebrochener Lauf verliert sonst alle bis dahin gesammelten Snapshots.
+const MAX_RUNTIME_MS = (parseInt(process.env.MAX_RUNTIME_MIN) || 35) * 60000;
 
 const LIFESKILLS = [
   'gathering','fishing','hunting','cooking','alchemy',
@@ -27,9 +30,7 @@ async function fetchWithRetry(url, params, retries = 12, delay = 8000) {
   throw new Error(`Kein Ergebnis nach ${retries} Versuchen`);
 }
 
-async function scrape(targetDate) {
-  console.log(`\nStarte Scrape für ${targetDate}`);
-
+async function fetchMembers() {
   const guild = await fetchWithRetry(`${BDO_API}/v1/guild`, { guildName: GUILD, region: REGION });
   const members = guild?.members || [];
   if (members.length === 0) throw new Error('Keine Guild-Mitglieder gefunden');
@@ -44,10 +45,20 @@ async function scrape(targetDate) {
     ).catch(() => {});
   }
 
+  return members;
+}
+
+// Holt die Profile der übergebenen Mitglieder. Was bis zur Deadline nicht
+// drankommt, landet in failed und wird beim nächsten Versuch/Lauf geholt.
+async function scrape(members, deadline) {
   const snapshots = [];
   const failed = [];
 
   for (const member of members) {
+    if (Date.now() > deadline) {
+      failed.push(member);
+      continue;
+    }
     try {
       const profile = await fetchWithRetry(`${BDO_API}/v1/adventurer`, {
         profileTarget: member.profileTarget, region: REGION
@@ -67,11 +78,11 @@ async function scrape(targetDate) {
       await sleep(5000);
     } catch (e) {
       console.error(`✗ ${member.familyName}: ${e.message}`);
-      failed.push(member.familyName);
+      failed.push(member);
     }
   }
 
-  return { snapshots, failed, total: members.length };
+  return { snapshots, failed };
 }
 
 async function main() {
@@ -83,33 +94,44 @@ async function main() {
   console.log('Warte 8s auf bdo-api...');
   await sleep(8000);
 
-  const MAX_ATTEMPTS = 3;
-  let lastResult = null;
-
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    console.log(`\n--- Versuch ${attempt}/${MAX_ATTEMPTS} ---`);
+  const deadline = Date.now() + MAX_RUNTIME_MS;
+  console.log(`\nStarte Scrape für ${targetDate}`);
+  let members;
+  for (let attempt = 1; !members; attempt++) {
     try {
-      lastResult = await scrape(targetDate);
-
-      if (lastResult.failed.length === 0) break;
-
-      console.log(`⚠️ ${lastResult.failed.length} fehlgeschlagen: ${lastResult.failed.join(', ')}`);
-      if (attempt < MAX_ATTEMPTS) {
-        console.log('Warte 3 Minuten...');
-        await sleep(3 * 60 * 1000);
-      }
+      members = await fetchMembers();
     } catch (e) {
-      console.error(`Fehler in Versuch ${attempt}: ${e.message}`);
-      if (attempt < MAX_ATTEMPTS) {
-        console.log('Warte 3 Minuten...');
-        await sleep(3 * 60 * 1000);
-      } else {
-        throw e;
-      }
+      console.error(`Mitgliederliste, Versuch ${attempt}/3: ${e.message}`);
+      if (attempt >= 3 || Date.now() + 3 * 60 * 1000 > deadline) throw e;
+      console.log('Warte 3 Minuten...');
+      await sleep(3 * 60 * 1000);
     }
   }
 
-  const { snapshots, failed, total } = lastResult;
+  // Weitere Versuche holen nur die fehlgeschlagenen Mitglieder nach — alle
+  // erneut abzufragen verdoppelt die Requests und provoziert 429er.
+  const MAX_ATTEMPTS = 3;
+  const snapshots = [];
+  let pending = members;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS && pending.length > 0; attempt++) {
+    if (Date.now() > deadline) break;
+    console.log(`\n--- Versuch ${attempt}/${MAX_ATTEMPTS}: ${pending.length} Mitglieder ---`);
+    const result = await scrape(pending, deadline);
+    snapshots.push(...result.snapshots);
+    pending = result.failed;
+
+    if (pending.length > 0 && attempt < MAX_ATTEMPTS) {
+      console.log(`⚠️ ${pending.length} fehlgeschlagen: ${pending.map(m => m.familyName).join(', ')}`);
+      if (Date.now() + 3 * 60 * 1000 > deadline) break;
+      console.log('Warte 3 Minuten...');
+      await sleep(3 * 60 * 1000);
+    }
+  }
+  if (Date.now() > deadline) console.log(`⏱  Laufzeit-Budget von ${MAX_RUNTIME_MS / 60000} min erreicht — sende, was da ist.`);
+
+  const failed = pending.map(m => m.familyName);
+  const total = members.length;
   if (snapshots.length === 0) throw new Error('Keine Daten gesammelt');
 
   console.log(`\nSende ${snapshots.length}/${total} Snapshots an Server...`);
