@@ -8,14 +8,14 @@ on:
         required: false
         default: ''
       player_limit:
-        description: 'Max players to scrape (empty = 350)'
+        description: 'Max players to scrape (empty = 150)'
         required: false
         default: ''
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +53,7 @@ jobs:
           CLARITY_SERVER_URL: https://clarity-guild.live
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
           TARGET_DATE: ${{ github.event.inputs.date }}
-          PLAYER_LIMIT: ${{ github.event.inputs.player_limit || '350' }}
+          PLAYER_LIMIT: ${{ github.event.inputs.player_limit || '150' }}
 
       - name: Scrape Asian players from timestorm.de
         run: node scrape-timestorm-asian.js

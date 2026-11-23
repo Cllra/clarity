@@ -7,6 +7,12 @@ const TARGET_DATE  = process.env.TARGET_DATE         || null;
 const PLAYER_LIMIT = process.env.PLAYER_LIMIT && parseInt(process.env.PLAYER_LIMIT) > 0
   ? parseInt(process.env.PLAYER_LIMIT)
   : null;
+// Stop scraping after this many minutes and send what we have — a run cancelled
+// by the workflow timeout would otherwise lose every snapshot collected so far.
+const MAX_RUNTIME_MS = (parseInt(process.env.MAX_RUNTIME_MIN) || 40) * 60000;
+// Consecutive failed players before giving up (rate-limited / blocked) — remaining
+// players stay pending and are picked up by the next run.
+const MAX_CONSECUTIVE_FAILS = parseInt(process.env.MAX_CONSECUTIVE_FAILS) || 5;
 
 const LIFESKILLS = [
   'gathering','fishing','hunting','cooking','alchemy',
@@ -88,8 +94,19 @@ async function main() {
   const snapshots    = [];
   const failed       = [];  // profile_targets: transient failures (retried next run)
   const unresolvable = [];  // {familyName, region}: permanent 400 from search → deactivate
+  const startedAt    = Date.now();
+  let consecutiveFails = 0;
 
   for (const player of players) {
+    if (Date.now() - startedAt > MAX_RUNTIME_MS) {
+      console.log(`⏱  Runtime budget of ${MAX_RUNTIME_MS / 60000} min reached — stopping, remaining players stay pending.`);
+      break;
+    }
+    if (consecutiveFails >= MAX_CONSECUTIVE_FAILS) {
+      console.log(`🛑 ${consecutiveFails} players failed in a row (rate limit / block?) — stopping, remaining players stay pending.`);
+      break;
+    }
+
     let profileTarget = player.profile_target;
 
     // Step 1: Resolve profileTarget if not yet known
@@ -115,6 +132,7 @@ async function main() {
         } else {
           // Transient (timeout, network, etc.)
           console.error(`✗ [${player.region}] ${player.family_name} (resolve): ${e.message}`);
+          consecutiveFails++;
         }
         continue;
       }
@@ -141,7 +159,8 @@ async function main() {
 
         snapshots.push(snap);
         console.log(`✓ [${player.region}] ${snap.family_name}`);
-        await sleep(5000);
+        consecutiveFails = 0;
+        await sleep(8000);
         break;
       } catch (e) {
         if (e.response?.status === 429 && attempt < MAX_PROFILE_RETRIES) {
@@ -151,6 +170,7 @@ async function main() {
         } else {
           console.error(`✗ [${player.region}] ${profileTarget}: ${e.message}`);
           failed.push(profileTarget);
+          consecutiveFails++;
           break;
         }
       }
