@@ -2,3 +2,5 @@
 data/
 backend/node_modules/
 scraper/node_modules/
+redis-data/
+CLAUDE.md
