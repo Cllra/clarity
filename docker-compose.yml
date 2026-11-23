@@ -27,7 +27,7 @@ services:
     environment:
       - CLARITY_DB_PATH=/data/clarity.db
       - SECRET_DB_PATH=/data/secret.db
-      - ADMIN_TOKEN=54f68e6e0a6adada4a5d74e53be9a66cfa9b49e5eccf608e52275dd8a5715ed5
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
     networks:
       - proxy-net
 
@@ -45,8 +45,8 @@ services:
       - BDO_API_URL=http://bdo-api:8001
       - GUILD_NAME=clarity
       - REGION=EU
-      - ADMIN_TOKEN=54f68e6e0a6adada4a5d74e53be9a66cfa9b49e5eccf608e52275dd8a5715ed5
-      - DISCORD_WEBHOOK=https://discord.com/api/webhooks/1507321177121624084/0AyDVHQ9ak-GBBbwK-RBVg0yMzpr6T-ITSgb30sADafIE9m0KqK5x5PCt1TXarCHja_4
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+      - DISCORD_WEBHOOK=${DISCORD_WEBHOOK}
       - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
       - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET}
       - DISCORD_GUILD_ID=${DISCORD_GUILD_ID}
