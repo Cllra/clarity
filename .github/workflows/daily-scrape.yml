@@ -7,11 +7,21 @@ on:
         description: 'Datum (YYYY-MM-DD), leer = gestern'
         required: false
         default: ''
+      only:
+        description: 'Nur diese Family Names (kommagetrennt), leer = alle. Setzt der automatische Nachhol-Lauf.'
+        required: false
+        default: ''
+
+# BDO drosselt eine IP nach ~50 Profilen. Deshalb holt jeder Shard nur einen
+# Teil der Mitglieder auf einem eigenen Runner (eigene IP), und was fehlt, holt
+# ein einzelner Nachhol-Lauf auf frischen Runnern.
 
 jobs:
-  scrape:
+  members:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
+    outputs:
+      members: ${{ steps.fetch.outputs.members }}
 
     steps:
       - uses: actions/checkout@v4
@@ -20,10 +30,55 @@ jobs:
         run: docker network create clarity-net
 
       - name: Redis starten
+        run: docker run -d --name clarity-redis --network clarity-net redis:7-alpine
+
+      - name: bdo-api starten
         run: |
-          docker run -d --name clarity-redis \
+          docker run -d --name bdo-api \
             --network clarity-net \
-            redis:7-alpine
+            -p 8001:8001 \
+            man90/bdo-rest-api:latest \
+            -redis redis://clarity-redis:6379/0
+
+      - name: Node.js einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Abhängigkeiten installieren
+        run: npm install
+        working-directory: scraper
+
+      - name: Mitgliederliste holen
+        id: fetch
+        run: node fetch-members.js
+        working-directory: scraper
+        env:
+          BDO_API_URL: http://localhost:8001
+          CLARITY_SERVER_URL: https://clarity-guild.live
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          ONLY_MEMBERS: ${{ github.event.inputs.only }}
+
+  scrape:
+    needs: members
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Runner-IP
+        run: curl -s --max-time 10 https://api.ipify.org || true
+
+      - name: Docker-Netzwerk erstellen
+        run: docker network create clarity-net
+
+      - name: Redis starten
+        run: docker run -d --name clarity-redis --network clarity-net redis:7-alpine
 
       - name: bdo-api starten
         run: |
@@ -47,6 +102,70 @@ jobs:
         working-directory: scraper
         env:
           BDO_API_URL: http://localhost:8001
+          MEMBERS_JSON: ${{ needs.members.outputs.members }}
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_COUNT: 3
+          OUT_FILE: result-${{ matrix.shard }}.json
+
+      - name: Ergebnis hochladen
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-${{ matrix.shard }}
+          path: scraper/result-${{ matrix.shard }}.json
+          if-no-files-found: ignore
+          retention-days: 3
+
+  send:
+    needs: [members, scrape]
+    if: always() && needs.members.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ergebnisse herunterladen
+        uses: actions/download-artifact@v4
+        with:
+          pattern: result-*
+          path: scraper/results
+          merge-multiple: true
+
+      - name: Node.js einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Abhängigkeiten installieren
+        run: npm install
+        working-directory: scraper
+
+      - name: Snapshots senden
+        id: send
+        run: node send-snapshots.js
+        working-directory: scraper
+        env:
           CLARITY_SERVER_URL: https://clarity-guild.live
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          MEMBERS_JSON: ${{ needs.members.outputs.members }}
           TARGET_DATE: ${{ github.event.inputs.date }}
+
+      - name: Nachhol-Lauf für fehlende Spieler starten
+        if: steps.send.outputs.failed != '' && github.event.inputs.only == ''
+        run: gh workflow run daily-scrape.yml --ref "$GITHUB_REF_NAME" -f date="$DATE" -f only="$FAILED"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DATE: ${{ steps.send.outputs.date }}
+          FAILED: ${{ steps.send.outputs.failed }}
+
+      - name: Fehlende Spieler nach Nachhol-Lauf
+        if: steps.send.outputs.failed != '' && github.event.inputs.only != ''
+        run: |
+          echo "::error::Auch nach dem Nachhol-Lauf fehlen: $FAILED"
+          exit 1
+        env:
+          FAILED: ${{ steps.send.outputs.failed }}

@@ -34,11 +34,13 @@ Player data comes from [man90/bdo-rest-api](https://github.com/man90/bdo-rest-ap
 
 | Workflow | Script | What it does |
 |---|---|---|
-| Daily Scrape | `scraper/scrape.js` | All Clarity guild members |
+| Daily Scrape | `scraper/fetch-members.js`, `scraper/scrape.js`, `scraper/send-snapshots.js` | All Clarity guild members, split across 3 runners |
 | Global Scrape — Run 1 / Run 2 | `scraper/scrape-global.js`, `scraper/scrape-timestorm-asian.js` | Players from other guilds and regions, in batches |
 | Life Scrape | `scraper/scrape-life.js` | Lifeskill data of the guild `life` |
 
 All workflows are started via `workflow_dispatch`. The server's crontab calls `trigger-scrape.sh` (02:00 UTC) and `trigger-scrape-global.sh` (03:00 UTC).
+
+The BDO website throttles a runner's IP after roughly 50 profiles. The daily scrape therefore fetches the member list once, scrapes it in 3 shards on separate runners (separate IPs), and sends all snapshots in one request. A shard stops as soon as its runner is throttled; members still missing are fetched by one automatic follow-up run (input `only`) on fresh runners.
 
 The BDO website rate-limits requests (HTTP 429). The global scraper therefore stops after a runtime budget (`MAX_RUNTIME_MIN`, default 40) or after several failed players in a row (`MAX_CONSECUTIVE_FAILS`, default 5) and sends what it has collected. Players it did not reach stay pending for the next run.
 
